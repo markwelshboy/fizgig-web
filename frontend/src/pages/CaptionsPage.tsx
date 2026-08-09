@@ -1,5 +1,12 @@
-import { useMemo, useState } from "react";
-import { saveCaption } from "../api";
+import { useEffect, useMemo, useState } from "react";
+import {
+  generateCaption,
+  getCaptioningOptions,
+  saveCaption,
+  unloadCaptionModels,
+  type CaptionGenerateRequest,
+  type CaptioningOptions,
+} from "../api";
 import { useSession } from "../session";
 
 export function CaptionsPage() {
@@ -7,10 +14,56 @@ export function CaptionsPage() {
   const [selectedName, setSelectedName] = useState(dataset?.images[0]?.filename ?? "");
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [bulkProgress, setBulkProgress] = useState("");
   const [message, setMessage] = useState("");
+  const [options, setOptions] = useState<CaptioningOptions | null>(null);
+  const [provider, setProvider] = useState<"qwen" | "florence">("qwen");
+  const [qwenTask, setQwenTask] = useState("training");
+  const [qwenInstruction, setQwenInstruction] = useState("");
+  const [qwenModelPath, setQwenModelPath] = useState("");
+  const [florenceModel, setFlorenceModel] = useState("MiaoshouAI/Florence-2-base-PromptGen");
+  const [florenceTask, setFlorenceTask] = useState("<DETAILED_CAPTION>");
+  const [maxTokens, setMaxTokens] = useState(120);
+  const [addTriggerWord, setAddTriggerWord] = useState(true);
 
   const selected = dataset?.images.find((image) => image.filename === selectedName) ?? dataset?.images[0];
   const [captionDraft, setCaptionDraft] = useState(selected?.caption ?? "");
+
+  const qwenProvider = options?.providers.find((item) => item.id === "qwen" && "tasks" in item);
+  const florenceProvider = options?.providers.find((item) => item.id === "florence" && "models" in item);
+  const activeQwenPreset = qwenProvider && "tasks" in qwenProvider ? qwenProvider.tasks[qwenTask] : undefined;
+
+  useEffect(() => {
+    getCaptioningOptions()
+      .then((result) => {
+        setOptions(result);
+        const qwen = result.providers.find((item) => item.id === "qwen" && "tasks" in item);
+        const florence = result.providers.find((item) => item.id === "florence" && "models" in item);
+        if (qwen && "tasks" in qwen) {
+          setQwenTask(qwen.default_task);
+          const preset = qwen.tasks[qwen.default_task];
+          if (preset) {
+            setQwenInstruction(preset.instruction);
+            setMaxTokens(preset.max_tokens);
+          }
+        }
+        if (florence && "models" in florence) {
+          setFlorenceModel(florence.default_model);
+          setFlorenceTask(florence.default_task);
+        }
+      })
+      .catch((err) => setMessage(err instanceof Error ? err.message : "Unable to load captioning options"));
+  }, []);
+
+  useEffect(() => {
+    if (!dataset) return;
+    const stillExists = dataset.images.some((image) => image.filename === selectedName);
+    if (!stillExists && dataset.images[0]) {
+      setSelectedName(dataset.images[0].filename);
+      setCaptionDraft(dataset.images[0].caption);
+    }
+  }, [dataset, selectedName]);
 
   const images = useMemo(() => {
     if (!dataset) return [];
@@ -26,24 +79,115 @@ export function CaptionsPage() {
     setMessage("");
   }
 
+  function replaceCaption(filename: string, caption: string) {
+    if (!dataset) return;
+    const nextImages = dataset.images.map((image) =>
+      image.filename === filename ? { ...image, caption, has_caption: Boolean(caption) } : image,
+    );
+    const captionCount = nextImages.filter((image) => image.has_caption).length;
+    setDataset({
+      ...dataset,
+      images: nextImages,
+      caption_count: captionCount,
+      missing_caption_count: nextImages.length - captionCount,
+    });
+  }
+
+  function generationRequest(save: boolean): CaptionGenerateRequest {
+    if (provider === "qwen") {
+      return {
+        provider,
+        model_path: qwenModelPath.trim() || undefined,
+        task: qwenTask,
+        instruction: qwenInstruction.trim() || undefined,
+        max_tokens: maxTokens,
+        trigger_word: triggerWord,
+        add_trigger_word: addTriggerWord,
+        save,
+      };
+    }
+    return {
+      provider,
+      model: florenceModel,
+      task: florenceTask,
+      max_tokens: maxTokens,
+      trigger_word: triggerWord,
+      add_trigger_word: addTriggerWord,
+      save,
+    };
+  }
+
   async function onSave() {
     if (!dataset || !selected) return;
     setSaving(true);
     setMessage("");
     try {
       const result = await saveCaption(dataset.id, selected.filename, captionDraft);
-      setDataset({
-        ...dataset,
-        caption_count: dataset.images.filter((image) => image.filename === selected.filename ? Boolean(result.caption) : image.has_caption).length,
-        missing_caption_count: dataset.images.filter((image) => image.filename === selected.filename ? !result.caption : !image.has_caption).length,
-        images: dataset.images.map((image) => image.filename === selected.filename ? { ...image, caption: result.caption, has_caption: Boolean(result.caption) } : image),
-      });
+      replaceCaption(selected.filename, result.caption);
       setCaptionDraft(result.caption);
       setMessage("Caption saved");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Unable to save caption");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function regenerateSelected() {
+    if (!dataset || !selected) return;
+    setGenerating(true);
+    setMessage(`Captioning ${selected.filename}…`);
+    try {
+      const result = await generateCaption(dataset.id, selected.filename, generationRequest(false));
+      setCaptionDraft(result.caption);
+      setMessage("Generated caption is in the editor. Review it, then Save Caption.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "Caption generation failed");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  async function generateMissing() {
+    if (!dataset) return;
+    const missing = dataset.images.filter((image) => !image.has_caption);
+    if (!missing.length) {
+      setMessage("All images already have captions.");
+      return;
+    }
+
+    setGenerating(true);
+    setMessage("");
+    let completed = 0;
+    let failed = 0;
+    try {
+      for (const image of missing) {
+        setBulkProgress(`${completed + failed + 1} / ${missing.length} · ${image.filename}`);
+        try {
+          const result = await generateCaption(dataset.id, image.filename, generationRequest(true));
+          replaceCaption(image.filename, result.caption);
+          if (image.filename === selected?.filename) setCaptionDraft(result.caption);
+          completed += 1;
+        } catch (err) {
+          failed += 1;
+          setMessage(err instanceof Error ? err.message : `Failed on ${image.filename}`);
+        }
+      }
+      setMessage(`Generate Missing finished: ${completed} saved${failed ? `, ${failed} failed` : ""}.`);
+    } finally {
+      setBulkProgress("");
+      setGenerating(false);
+    }
+  }
+
+  function chooseQwenTask(task: string) {
+    setQwenTask(task);
+    if (qwenProvider && "tasks" in qwenProvider) {
+      const preset = qwenProvider.tasks[task];
+      if (preset) {
+        setQwenInstruction(preset.instruction);
+        setMaxTokens(preset.max_tokens);
+      }
     }
   }
 
@@ -59,7 +203,13 @@ export function CaptionsPage() {
 
   return (
     <div className="stack">
-      <header className="page-header"><div><p className="eyebrow">Dataset</p><h1>Captions</h1><p className="muted">Review and edit the caption sidecars in {dataset.path}.</p></div><div className="actions"><button className="primary">Generate Missing</button><button className="secondary">Bulk Actions</button></div></header>
+      <header className="page-header">
+        <div><p className="eyebrow">Dataset</p><h1>Captions</h1><p className="muted">Review, generate, and edit caption sidecars in {dataset.path}.</p></div>
+        <div className="actions">
+          <button className="primary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button>
+          <button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button>
+        </div>
+      </header>
       <div className="caption-layout">
         <section className="panel">
           <div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{images.length} / {dataset.image_count}</span></div>
@@ -78,12 +228,62 @@ export function CaptionsPage() {
               <div><div className="card-title">{selected.filename}</div><div className="muted">{dataset.images.findIndex((image) => image.filename === selected.filename) + 1} / {dataset.image_count}</div></div>
               <div className="caption-preview"><img src={selected.image_url} alt={selected.filename} /></div>
               <label>Caption<textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} /></label>
-              <label>Trigger word<input value={triggerWord} readOnly /></label>
-              {message && <div className={message === "Caption saved" ? "notice success" : "notice error"}>{message}</div>}
-              <div className="actions"><button className="secondary">Regenerate with AI</button><button className="primary" onClick={onSave} disabled={saving}>{saving ? "Saving…" : "Save Caption"}</button></div>
-              <div className="card-title">AI Captioning</div>
-              <label>Provider<select defaultValue="qwen"><option value="qwen">Qwen3-VL 8B Instruct</option><option value="joy">JoyCaption</option></select></label>
-              <label><input type="checkbox" defaultChecked /> Add trigger word automatically</label>
+              {message && <div className={message.includes("failed") || message.includes("requires") || message.includes("not configured") ? "notice error" : "notice success"}>{message}</div>}
+              <div className="actions"><button className="secondary" onClick={regenerateSelected} disabled={generating}>{generating ? "Generating…" : "Regenerate with AI"}</button><button className="primary" onClick={onSave} disabled={saving || generating}>{saving ? "Saving…" : "Save Caption"}</button></div>
+
+              <div className="caption-ai-section stack">
+                <div className="card-title">AI Captioning</div>
+                <div className="form-row">
+                  <label>Provider
+                    <select value={provider} onChange={(event) => setProvider(event.target.value as "qwen" | "florence")}>
+                      <option value="qwen">Qwen3-VL 4B</option>
+                      <option value="florence">Florence-2</option>
+                    </select>
+                  </label>
+                  <label>Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label>
+                </div>
+
+                {provider === "qwen" ? (
+                  <>
+                    <label>Caption preset
+                      <select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>
+                        {qwenProvider && "tasks" in qwenProvider
+                          ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>)
+                          : <option value="training">Training caption (viewpoint-aware)</option>}
+                      </select>
+                    </label>
+                    <label>Qwen3-VL text encoder path <span className="muted">Optional here if configured on the server</span>
+                      <input value={qwenModelPath} onChange={(event) => setQwenModelPath(event.target.value)} placeholder="FIZGIG_QWEN_CAPTION_MODEL or Preferences" />
+                    </label>
+                    <label>Captioning instruction — editable prompt override
+                      <textarea className="instruction-editor" value={qwenInstruction} onChange={(event) => setQwenInstruction(event.target.value)} />
+                    </label>
+                    <div className="prompt-actions">
+                      <span className="muted">This prompt is sent alongside the image. It does not alter Krea 2's fixed text-encoding system descriptor.</span>
+                      <button className="secondary" onClick={() => activeQwenPreset && setQwenInstruction(activeQwenPreset.instruction)} disabled={!activeQwenPreset}>Restore preset</button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <label>Florence model
+                      <select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>
+                        {florenceProvider && "models" in florenceProvider
+                          ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>)
+                          : <option value={florenceModel}>{florenceModel}</option>}
+                      </select>
+                    </label>
+                    <label>Florence task
+                      <select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>
+                        {florenceProvider && "tasks" in florenceProvider
+                          ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>)
+                          : <option value={florenceTask}>{florenceTask}</option>}
+                      </select>
+                    </label>
+                  </>
+                )}
+
+                <label className="inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger word automatically <span className="muted">({triggerWord})</span></label>
+              </div>
             </>
           ) : <p className="muted">No image selected.</p>}
         </section>
