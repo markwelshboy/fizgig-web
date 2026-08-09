@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   generateCaption,
   getCaptioningOptions,
+  inspectDataset,
   saveCaption,
   unloadCaptionModels,
   type CaptionGenerateRequest,
@@ -80,16 +81,18 @@ export function CaptionsPage() {
   }
 
   function replaceCaption(filename: string, caption: string) {
-    if (!dataset) return;
-    const nextImages = dataset.images.map((image) =>
-      image.filename === filename ? { ...image, caption, has_caption: Boolean(caption) } : image,
-    );
-    const captionCount = nextImages.filter((image) => image.has_caption).length;
-    setDataset({
-      ...dataset,
-      images: nextImages,
-      caption_count: captionCount,
-      missing_caption_count: nextImages.length - captionCount,
+    setDataset((current) => {
+      if (!current) return current;
+      const nextImages = current.images.map((image) =>
+        image.filename === filename ? { ...image, caption, has_caption: Boolean(caption) } : image,
+      );
+      const captionCount = nextImages.filter((image) => image.has_caption).length;
+      return {
+        ...current,
+        images: nextImages,
+        caption_count: captionCount,
+        missing_caption_count: nextImages.length - captionCount,
+      };
     });
   }
 
@@ -172,6 +175,11 @@ export function CaptionsPage() {
           failed += 1;
           setMessage(err instanceof Error ? err.message : `Failed on ${image.filename}`);
         }
+      }
+      try {
+        setDataset(await inspectDataset(dataset.path));
+      } catch {
+        // Individual saves already updated local state; a refresh failure should not erase them.
       }
       setMessage(`Generate Missing finished: ${completed} saved${failed ? `, ${failed} failed` : ""}.`);
     } finally {
