@@ -1,1 +1,1 @@
-"""Fizgig Web backend package."""
+"""Fizgig Web backend."""
