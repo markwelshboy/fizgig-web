@@ -6,7 +6,9 @@ from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+
+from .captioning import add_trigger, caption_service
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
 
@@ -20,6 +22,18 @@ class DatasetRequest(BaseModel):
 
 class CaptionUpdate(BaseModel):
     caption: str
+
+
+class CaptionGenerateRequest(BaseModel):
+    provider: str = "qwen"
+    model: str | None = None
+    model_path: str | None = None
+    task: str | None = None
+    instruction: str | None = None
+    max_tokens: int | None = Field(default=None, ge=16, le=1024)
+    trigger_word: str = ""
+    add_trigger_word: bool = True
+    save: bool = False
 
 
 def _dataset_id(path: Path) -> str:
@@ -38,6 +52,12 @@ def _safe_image(dataset: Path, filename: str) -> Path:
     if image.parent != dataset or image.suffix.lower() not in IMAGE_EXTENSIONS or not image.is_file():
         raise HTTPException(status_code=404, detail="Image not found in dataset")
     return image
+
+
+def _write_caption(image: Path, caption: str) -> str:
+    cleaned = caption.strip()
+    image.with_suffix(".txt").write_text(cleaned + ("\n" if cleaned else ""), encoding="utf-8")
+    return cleaned
 
 
 def _image_record(dataset_id: str, image: Path) -> dict[str, object]:
@@ -78,6 +98,16 @@ def model_families() -> list[dict[str, object]]:
             },
         },
     ]
+
+
+@app.get("/api/captioning/options")
+def captioning_options() -> dict[str, object]:
+    return caption_service.options()
+
+
+@app.post("/api/captioning/unload")
+def unload_caption_models() -> dict[str, object]:
+    return {"unloaded": caption_service.unload()}
 
 
 @app.post("/api/datasets/inspect")
@@ -135,6 +165,38 @@ def get_caption(dataset_id: str, filename: str) -> dict[str, str]:
 def update_caption(dataset_id: str, filename: str, update: CaptionUpdate) -> dict[str, str]:
     dataset = _get_dataset(dataset_id)
     image = _safe_image(dataset, filename)
-    caption_path = image.with_suffix(".txt")
-    caption_path.write_text(update.caption.strip() + ("\n" if update.caption.strip() else ""), encoding="utf-8")
-    return {"filename": image.name, "caption": update.caption.strip()}
+    return {"filename": image.name, "caption": _write_caption(image, update.caption)}
+
+
+@app.post("/api/datasets/{dataset_id}/captions/{filename}/generate")
+def generate_caption(dataset_id: str, filename: str, request: CaptionGenerateRequest) -> dict[str, object]:
+    dataset = _get_dataset(dataset_id)
+    image = _safe_image(dataset, filename)
+    try:
+        caption = caption_service.generate(
+            provider=request.provider,
+            image_path=image,
+            model=request.model,
+            model_path=request.model_path,
+            task=request.task,
+            instruction=request.instruction,
+            max_tokens=request.max_tokens,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Caption generation failed: {type(exc).__name__}: {exc}") from exc
+
+    if request.add_trigger_word:
+        caption = add_trigger(caption, request.trigger_word)
+    if request.save:
+        caption = _write_caption(image, caption)
+
+    return {
+        "filename": image.name,
+        "caption": caption,
+        "saved": request.save,
+        "provider": request.provider,
+    }
