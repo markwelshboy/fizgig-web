@@ -1,13 +1,13 @@
-import { createContext, ReactNode, useContext, useMemo, useState } from "react";
+import { createContext, Dispatch, ReactNode, SetStateAction, useContext, useMemo, useState } from "react";
 import type { DatasetInfo } from "./api";
 
 type SessionState = {
   dataset: DatasetInfo | null;
-  setDataset: (dataset: DatasetInfo | null) => void;
+  setDataset: Dispatch<SetStateAction<DatasetInfo | null>>;
   modelFamily: "krea2" | "klein";
-  setModelFamily: (family: "krea2" | "klein") => void;
+  setModelFamily: Dispatch<SetStateAction<"krea2" | "klein">>;
   triggerWord: string;
-  setTriggerWord: (trigger: string) => void;
+  setTriggerWord: Dispatch<SetStateAction<string>>;
 };
 
 const SessionContext = createContext<SessionState | null>(null);
