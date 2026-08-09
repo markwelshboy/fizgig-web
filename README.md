@@ -66,6 +66,8 @@ Qwen captioning uses the Krea 2 Qwen3-VL text-encoder safetensors. Until Prefere
 export FIZGIG_QWEN_CAPTION_MODEL=/workspace/models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors
 ```
 
+The Qwen preset list and prompt text are read directly from upstream `fizgig.krea2.embedder.CAPTION_TASKS` whenever that checkout is available, keeping the web UI aligned with Fizgig's auto-recaption behavior. The server has fallback labels only so the UI can still render before Fizgig is configured.
+
 Florence models are lazy-downloaded from Hugging Face on first use and follow the pinned revisions used by upstream Fizgig.
 
 In another shell, start the frontend:
