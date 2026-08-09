@@ -1,3 +1,6 @@
 fastapi
 uvicorn[standard]
 pydantic
+# AI captioning intentionally reuses the upstream Fizgig environment for torch,
+# transformers, Pillow and the Krea/Qwen loader rather than duplicating/pinning
+# a second ML stack here.
