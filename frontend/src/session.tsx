@@ -14,6 +14,7 @@ type SessionState = {
   setModelFamily: Dispatch<SetStateAction<"krea2" | "klein">>;
   triggerWord: string;
   setTriggerWord: Dispatch<SetStateAction<string>>;
+  closeProject: () => void;
 };
 
 const SessionContext = createContext<SessionState | null>(null);
@@ -25,6 +26,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [modelFamily, setModelFamily] = useState<"krea2" | "klein">("krea2");
   const [triggerWord, setTriggerWord] = useState("sH1VX");
+
+  function closeProject() {
+    setProject(null);
+    setRevision(null);
+    setRun(null);
+    setDataset(null);
+  }
 
   const value = useMemo(
     () => ({
@@ -40,6 +48,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       setModelFamily,
       triggerWord,
       setTriggerWord,
+      closeProject,
     }),
     [project, revision, run, dataset, modelFamily, triggerWord],
   );
