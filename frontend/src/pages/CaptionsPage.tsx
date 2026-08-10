@@ -13,7 +13,8 @@ import { useSession } from "../session";
 
 export function CaptionsPage() {
   const { project, revision, setRevision, dataset, setDataset, run, triggerWord } = useSession();
-  const [selectedName, setSelectedName] = useState(revision?.assets[0]?.filename ?? "");
+  const initialAsset = revision?.assets.find((asset) => asset.included !== false);
+  const [selectedName, setSelectedName] = useState(initialAsset?.filename ?? "");
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -31,7 +32,7 @@ export function CaptionsPage() {
   const [maxTokens, setMaxTokens] = useState(120);
   const [addTriggerWord, setAddTriggerWord] = useState(true);
 
-  const assets = revision?.assets ?? [];
+  const assets = (revision?.assets ?? []).filter((asset) => asset.included !== false);
   const selectedAsset = assets.find((asset) => asset.filename === selectedName) ?? assets[0];
   const selectedImage = dataset?.images.find((image) => image.filename === selectedAsset?.filename);
   const [captionDraft, setCaptionDraft] = useState(selectedAsset?.caption ?? "");
@@ -87,13 +88,7 @@ export function CaptionsPage() {
 
   async function saveCanonical(filename: string, caption: string, reason: string, metadata: Record<string, unknown>) {
     if (!project || !revision) throw new Error("Open a project revision first");
-    const result = await updateProjectCaption(project.id, revision.id, filename, {
-      caption,
-      reason,
-      metadata,
-      materialize: Boolean(run),
-      run_id: run?.id,
-    });
+    const result = await updateProjectCaption(project.id, revision.id, filename, { caption, reason, metadata, materialize: Boolean(run), run_id: run?.id });
     await refreshRevision();
     return result;
   }
@@ -120,8 +115,8 @@ export function CaptionsPage() {
 
   async function generateMissing() {
     if (!dataset || !revision) return;
-    const missing = revision.assets.filter((asset) => !asset.caption.trim());
-    if (!missing.length) { setMessage("All project assets already have captions."); return; }
+    const missing = assets.filter((asset) => !asset.caption.trim());
+    if (!missing.length) { setMessage("All included working assets already have captions."); return; }
     setGenerating(true); setMessage("");
     let completed = 0; let failed = 0;
     try {
@@ -147,44 +142,21 @@ export function CaptionsPage() {
 
   if (!project || !revision || !dataset) return <section className="panel hero-panel stack"><p className="eyebrow">Project required</p><h1>Captions</h1><p className="muted">Open a project and working dataset on the Start page first.</p></section>;
 
-  return (
-    <div className="stack">
-      <header className="page-header">
-        <div><p className="eyebrow">{project.name} · {revision.name}</p><h1>Captions</h1><p className="muted">Project JSON is authoritative. Trainer .txt sidecars are generated only when Fizgig needs them.</p></div>
-        <div className="actions"><button className="primary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div>
-      </header>
-      <div className="caption-layout">
-        <section className="panel">
-          <div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div>
-          <div className="thumb-grid caption-grid">
-            {visibleAssets.map((asset) => { const image = dataset.images.find((item) => item.filename === asset.filename); return image ? <button className={`thumb caption-thumb ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} key={asset.filename} onClick={() => selectImage(asset.filename)} title={asset.filename}><img src={image.image_url} alt={asset.filename} />{!asset.caption.trim() && <span className="missing-dot" title="Missing caption" />}</button> : null; })}
-          </div>
-        </section>
-        <section className="panel stack">
-          {selectedAsset && selectedImage ? <>
-            <div><div className="card-title">{selectedAsset.filename}</div><div className="muted">{assets.findIndex((asset) => asset.filename === selectedAsset.filename) + 1} / {assets.length} · canonical project caption</div></div>
-            <div className="caption-preview"><img src={selectedImage.image_url} alt={selectedAsset.filename} /></div>
-            <label>Caption<textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} /></label>
-            {message && <div className={message.includes("failed") || message.includes("requires") || message.includes("not configured") ? "notice error" : "notice success"}>{message}</div>}
-            <div className="actions"><button className="secondary" onClick={regenerateSelected} disabled={generating}>{generating ? "Generating…" : "Regenerate with AI"}</button><button className="primary" onClick={onSave} disabled={saving || generating}>{saving ? "Saving…" : "Save Caption"}</button></div>
-            <div className="caption-ai-section stack">
-              <div className="card-title">AI Captioning</div>
-              <div className="form-row"><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value as "qwen" | "florence")}><option value="qwen">Qwen3-VL</option><option value="florence">Florence-2</option></select></label><label>Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label></div>
-              {provider === "qwen" ? <>
-                <label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /><span className="muted">Hugging Face repo ID or HF-compatible local model directory; independent of the training encoder.</span></label>
-                <div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div>
-                <label>Caption preset<select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>{qwenProvider && "tasks" in qwenProvider ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>) : <option value="training">Training caption (viewpoint-aware)</option>}</select></label>
-                <label>Captioning instruction — editable prompt override<textarea className="instruction-editor" value={qwenInstruction} onChange={(event) => setQwenInstruction(event.target.value)} /></label>
-                <div className="prompt-actions"><span className="muted">Every committed AI caption records this model, preset and resolved instruction in project history.</span><button className="secondary" onClick={() => activeQwenPreset && setQwenInstruction(activeQwenPreset.instruction)} disabled={!activeQwenPreset}>Restore preset</button></div>
-              </> : <>
-                <label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label>
-                <label>Florence task<select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select></label>
-              </>}
-              <label className="inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger word automatically <span className="muted">({triggerWord})</span></label>
-            </div>
-          </> : <p className="muted">No image selected.</p>}
-        </section>
-      </div>
+  return <div className="stack">
+    <header className="page-header"><div><p className="eyebrow">{project.name} · {revision.name}</p><h1>Captions</h1><p className="muted">Only the included Image Prep working set appears here. Project JSON is authoritative; trainer .txt sidecars are generated only when Fizgig needs them.</p></div><div className="actions"><button className="primary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div></header>
+    <div className="caption-layout">
+      <section className="panel"><div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="thumb-grid caption-grid">{visibleAssets.map((asset) => { const image = dataset.images.find((item) => item.filename === asset.filename); return image ? <button className={`thumb caption-thumb ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} key={asset.filename} onClick={() => selectImage(asset.filename)} title={asset.filename}><img src={image.image_url} alt={asset.filename} />{!asset.caption.trim() && <span className="missing-dot" title="Missing caption" />}</button> : null; })}</div></section>
+      <section className="panel stack">{selectedAsset && selectedImage ? <>
+        <div><div className="card-title">{selectedAsset.filename}</div><div className="muted">{assets.findIndex((asset) => asset.filename === selectedAsset.filename) + 1} / {assets.length} · canonical project caption</div></div>
+        <div className="caption-preview"><img src={selectedImage.image_url} alt={selectedAsset.filename} /></div>
+        <label>Caption<textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} /></label>
+        {message && <div className={message.includes("failed") || message.includes("requires") || message.includes("not configured") ? "notice error" : "notice success"}>{message}</div>}
+        <div className="actions"><button className="secondary" onClick={regenerateSelected} disabled={generating}>{generating ? "Generating…" : "Regenerate with AI"}</button><button className="primary" onClick={onSave} disabled={saving || generating}>{saving ? "Saving…" : "Save Caption"}</button></div>
+        <div className="caption-ai-section stack"><div className="card-title">AI Captioning</div><div className="form-row"><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value as "qwen" | "florence")}><option value="qwen">Qwen3-VL</option><option value="florence">Florence-2</option></select></label><label>Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label></div>
+          {provider === "qwen" ? <><label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /><span className="muted">Hugging Face repo ID or HF-compatible local model directory; independent of the training encoder.</span></label><div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div><label>Caption preset<select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>{qwenProvider && "tasks" in qwenProvider ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>) : <option value="training">Training caption (viewpoint-aware)</option>}</select></label><label>Captioning instruction — editable prompt override<textarea className="instruction-editor" value={qwenInstruction} onChange={(event) => setQwenInstruction(event.target.value)} /></label><div className="prompt-actions"><span className="muted">Every committed AI caption records this model, preset and resolved instruction in project history.</span><button className="secondary" onClick={() => activeQwenPreset && setQwenInstruction(activeQwenPreset.instruction)} disabled={!activeQwenPreset}>Restore preset</button></div></> : <><label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label><label>Florence task<select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select></label></>}
+          <label className="inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger word automatically <span className="muted">({triggerWord})</span></label>
+        </div>
+      </> : <p className="muted">No included image selected.</p>}</section>
     </div>
-  );
+  </div>;
 }
