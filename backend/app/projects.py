@@ -57,9 +57,11 @@ def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
 class ProjectStore:
     """Portable, file-based provenance store.
 
-    Project state is human-readable JSON. Events are append-only JSONL. Source assets are copied
-    into the project and never modified. Dataset revisions are materialized working sets so image
-    prep/captioning can evolve without destroying the imported starting point.
+    The external dataset is always the user's canonical source and is never modified by Fizgig Web.
+    A project stores an immutable import snapshot for reproducibility, plus model-specific scratch
+    dataset revisions derived from that snapshot. Scratch revisions are working material only: they
+    may be cropped, resized, brightened, recaptioned, extended with face crops, or otherwise changed
+    without ever becoming the canonical source.
     """
 
     def __init__(self, root: str | None = None) -> None:
@@ -97,11 +99,11 @@ class ProjectStore:
         return event
 
     def create_project(self, *, name: str, source_path: str, trigger_word: str = "", description: str = "") -> dict[str, Any]:
-        source = Path(source_path).expanduser().resolve()
-        if not source.is_dir():
-            raise FileNotFoundError(f"Source dataset folder does not exist: {source}")
+        external_source = Path(source_path).expanduser().resolve()
+        if not external_source.is_dir():
+            raise FileNotFoundError(f"Source dataset folder does not exist: {external_source}")
         images = sorted(
-            (p for p in source.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS),
+            (p for p in external_source.iterdir() if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS),
             key=lambda p: p.name.lower(),
         )
         if not images:
@@ -113,40 +115,43 @@ class ProjectStore:
         while (self.root / project_id).exists():
             project_id = f"{base}-{n}"
             n += 1
-        project_dir = self.root / project_id
-        src_images = project_dir / "source" / "images"
-        src_captions = project_dir / "source" / "captions"
-        src_images.mkdir(parents=True)
-        src_captions.mkdir(parents=True)
 
-        manifest_assets: list[dict[str, Any]] = []
+        project_dir = self.root / project_id
+        import_id = "import-0001"
+        import_dir = project_dir / "imports" / import_id
+        import_files = import_dir / "files"
+        import_files.mkdir(parents=True)
+
+        assets: list[dict[str, Any]] = []
         for image in images:
-            dest_image = src_images / image.name
+            dest_image = import_files / image.name
             shutil.copy2(image, dest_image)
             caption_source = image.with_suffix(".txt")
             caption = _read_caption(caption_source)
-            caption_name = image.with_suffix(".txt").name
             if caption_source.is_file():
-                shutil.copy2(caption_source, src_captions / caption_name)
-            manifest_assets.append({
+                shutil.copy2(caption_source, dest_image.with_suffix(".txt"))
+            assets.append({
                 "id": uuid.uuid4().hex[:16],
                 "filename": image.name,
-                "source_filename": image.name,
+                "external_source_path": str(image),
                 "image_sha256": _sha256(dest_image),
                 "caption": caption,
                 "caption_sha256": hashlib.sha256(caption.encode("utf-8")).hexdigest(),
-                "origin": "source_import",
+                "origin": "external_source_import",
                 "parent_asset_id": None,
                 "operations": [],
             })
 
-        source_manifest = {
+        import_manifest = {
+            "id": import_id,
             "created_at": _now(),
-            "imported_from": str(source),
-            "image_count": len(manifest_assets),
-            "assets": manifest_assets,
+            "external_source_path": str(external_source),
+            "purpose": "immutable_reproducibility_snapshot",
+            "files_path": str(import_files),
+            "image_count": len(assets),
+            "assets": assets,
         }
-        _write_json(project_dir / "source" / "manifest.json", source_manifest)
+        _write_json(import_dir / "manifest.json", import_manifest)
 
         project = {
             "id": project_id,
@@ -155,8 +160,18 @@ class ProjectStore:
             "trigger_word": trigger_word.strip(),
             "created_at": _now(),
             "updated_at": _now(),
-            "source_imported_from": str(source),
-            "source_image_count": len(manifest_assets),
+            "external_source": {
+                "path": str(external_source),
+                "owned_by_project": False,
+                "mutable_by_project": False,
+            },
+            "imports": [{
+                "id": import_id,
+                "created_at": import_manifest["created_at"],
+                "image_count": len(assets),
+                "path": str(import_files),
+            }],
+            "current_import": import_id,
             "current_dataset_revision": None,
             "current_run": None,
             "dataset_revisions": [],
@@ -164,11 +179,22 @@ class ProjectStore:
         }
         _write_json(project_dir / "project.json", project)
         self._event(project_dir, "project_created", project_id=project_id, name=project["name"], trigger_word=project["trigger_word"])
-        self._event(project_dir, "source_imported", source_path=str(source), image_count=len(manifest_assets))
+        self._event(
+            project_dir,
+            "external_source_snapshotted",
+            external_source_path=str(external_source),
+            import_id=import_id,
+            image_count=len(assets),
+        )
 
-        revision = self.create_revision(project_id, name="Imported source", model_family="generic", parent_revision=None)
-        project = self.get_project(project_id)
-        return {"project": project, "revision": revision}
+        revision = self.create_revision(
+            project_id,
+            name="Initial working dataset",
+            model_family="generic",
+            parent_revision=None,
+            import_id=import_id,
+        )
+        return {"project": self.get_project(project_id), "revision": revision}
 
     def create_revision(
         self,
@@ -177,6 +203,7 @@ class ProjectStore:
         name: str,
         model_family: str,
         parent_revision: str | None = None,
+        import_id: str | None = None,
     ) -> dict[str, Any]:
         project_dir = self.project_dir(project_id)
         project = self.get_project(project_id)
@@ -189,29 +216,31 @@ class ProjectStore:
         if parent_revision:
             parent_dir = project_dir / "datasets" / parent_revision
             parent_manifest = _read_json(parent_dir / "manifest.json")
-            source_files = parent_dir / "files"
+            basis_files = parent_dir / "files"
             assets = parent_manifest["assets"]
+            basis = {"type": "dataset_revision", "id": parent_revision}
         else:
-            source_manifest = _read_json(project_dir / "source" / "manifest.json")
-            source_files = project_dir / "source" / "images"
-            assets = source_manifest["assets"]
+            selected_import = import_id or project.get("current_import")
+            if not selected_import:
+                raise ValueError("Project has no import snapshot")
+            import_dir = project_dir / "imports" / selected_import
+            import_manifest = _read_json(import_dir / "manifest.json")
+            basis_files = import_dir / "files"
+            assets = import_manifest["assets"]
+            basis = {"type": "import_snapshot", "id": selected_import}
 
         revision_assets: list[dict[str, Any]] = []
         for asset in assets:
             image_name = asset["filename"]
-            src_image = source_files / image_name
-            if not src_image.is_file() and not parent_revision:
-                src_image = project_dir / "source" / "images" / image_name
+            src_image = basis_files / image_name
+            if not src_image.is_file():
+                continue
             dest_image = files_dir / image_name
             shutil.copy2(src_image, dest_image)
-
-            if parent_revision:
-                src_caption = source_files / Path(image_name).with_suffix(".txt").name
-            else:
-                src_caption = project_dir / "source" / "captions" / Path(image_name).with_suffix(".txt").name
+            src_caption = src_image.with_suffix(".txt")
             if src_caption.is_file():
-                shutil.copy2(src_caption, files_dir / src_caption.name)
-            caption = _read_caption(files_dir / Path(image_name).with_suffix(".txt").name)
+                shutil.copy2(src_caption, dest_image.with_suffix(".txt"))
+            caption = _read_caption(dest_image.with_suffix(".txt"))
             revision_assets.append({
                 **asset,
                 "caption": caption,
@@ -223,15 +252,17 @@ class ProjectStore:
             "name": name.strip() or revision_id,
             "model_family": model_family,
             "created_at": _now(),
-            "parent_revision": parent_revision,
+            "basis": basis,
+            "scratch": True,
             "files_path": str(files_dir),
             "assets": revision_assets,
         }
         prep = {
             "revision": revision_id,
             "model_family": model_family,
+            "scratch": True,
             "operations": [],
-            "notes": "Derived image operations are appended here by Image Prep.",
+            "notes": "Working dataset only. Never treated as canonical source material.",
         }
         _write_json(revision_dir / "manifest.json", manifest)
         _write_json(revision_dir / "prep.json", prep)
@@ -240,10 +271,11 @@ class ProjectStore:
             "id": revision_id,
             "name": manifest["name"],
             "model_family": model_family,
-            "parent_revision": parent_revision,
+            "basis": basis,
             "created_at": manifest["created_at"],
             "image_count": len(revision_assets),
             "path": str(files_dir),
+            "scratch": True,
         })
         project["current_dataset_revision"] = revision_id
         self._save_project(project_dir, project)
@@ -253,8 +285,9 @@ class ProjectStore:
             revision=revision_id,
             name=manifest["name"],
             model_family=model_family,
-            parent_revision=parent_revision,
+            basis=basis,
             image_count=len(revision_assets),
+            scratch=True,
         )
         return manifest
 
@@ -288,6 +321,8 @@ class ProjectStore:
         files_dir = Path(revision["files_path"])
         for asset in revision["assets"]:
             image = files_dir / asset["filename"]
+            if not image.is_file():
+                continue
             caption = _read_caption(image.with_suffix(".txt"))
             snapshot_assets.append({
                 "asset_id": asset.get("id"),
@@ -305,6 +340,7 @@ class ProjectStore:
             "project_id": project_id,
             "run_id": run_id,
             "dataset_revision": dataset_revision,
+            "dataset_is_scratch": True,
             "image_count": len(snapshot_assets),
             "assets": snapshot_assets,
         }
@@ -320,6 +356,7 @@ class ProjectStore:
             "trigger_word": trigger_word.strip(),
             "dataset_revision": dataset_revision,
             "dataset_path": revision["files_path"],
+            "dataset_is_scratch": True,
             "output_dir": str(run_dir),
             "config": config or {},
             "software": {},
