@@ -110,16 +110,20 @@
 .source-filter-status strong { color: #eef3ff; font-size: 16px; text-align: right; }
 .source-bulk-actions { justify-content: flex-end; }
 .source-selection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 180px)); gap: 10px; align-items: start; justify-content: start; }
-.source-selection-card { width: 100%; min-width: 0; padding: 0; overflow: hidden; text-align: left; position: relative; }
-.source-selection-image { aspect-ratio: 1 / 1; display: grid; place-items: center; background: #06101c; }
-.source-selection-image img { width: 100%; height: 100%; object-fit: cover; }
-.source-selection-card:hover .source-selection-image img { object-fit: contain; }
+.source-selection-card { width: 100%; min-width: 0; padding: 0; overflow: hidden; text-align: left; position: relative; transition: opacity .15s ease, filter .15s ease, border-color .15s ease; }
+.source-selection-image { aspect-ratio: 1 / 1; display: block; position: relative; overflow: hidden; background: #06101c; }
+.source-selection-image img { width: 100%; height: 100%; display: block; object-fit: cover !important; object-position: center; transition: object-fit .12s ease; }
+/* Source review cards deliberately override the generic excluded-card treatment: an unselected source must remain easy to inspect. */
+.source-selection-card.excluded { opacity: .76; filter: saturate(.82) brightness(.9); }
+.source-selection-card.excluded:hover { opacity: 1; filter: none; }
+/* Hovering anywhere over the source card switches the square thumbnail from crop/cover to full-image/contain. */
+.source-selection-card:hover .source-selection-image img { object-fit: contain !important; object-position: center; background: #06101c; }
 .source-selection-card .prep-image-meta { padding: 7px 8px 8px; }
 .source-selection-card .prep-image-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
 .caption-badge, .selection-check { position: absolute; z-index: 4; top: 7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; box-shadow: 0 3px 12px rgba(0,0,0,.35); }
 .caption-badge { right: 7px; background: rgba(76,29,149,.94); border: 1px solid #a78bfa; color: white; }
 .selection-check { left: 7px; background: rgba(9,22,37,.92); border: 1px solid #52657e; color: #86efac; }
-.source-selection-card.selected { border-color: #2dd4bf; box-shadow: inset 0 0 0 1px rgba(45,212,191,.22); }
+.source-selection-card.selected { opacity: 1; filter: none; border-color: #2dd4bf; box-shadow: inset 0 0 0 1px rgba(45,212,191,.22); }
 .source-selection-card.excluded::after { content: none; }
 
 .project-row-shell { position: relative; }
