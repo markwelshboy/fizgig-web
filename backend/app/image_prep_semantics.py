@@ -1,19 +1,10 @@
-"""Image Prep semantic fixes kept separate while the POC UI is being iterated.
-
-This module patches the small set of policy helpers used by ``image_prep`` so existing
-projects and run materialization agree on these rules:
-
-* source images are uncropped by default;
-* a per-image aspect override is an explicit request to crop that source image;
-* physically-created derivatives are already framed and are not cropped again unless
-  the user explicitly adds another transform override.
-"""
+"""Image Prep semantic fixes kept separate while the POC UI is being iterated."""
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 from . import image_prep as prep
-
 
 prep.DEFAULT_GLOBAL_TRANSFORM.update({
     "aspect_ratio": "source",
@@ -28,15 +19,14 @@ def effective_transform(manifest: dict[str, Any], asset: dict[str, Any]) -> dict
     override = dict(asset.get("transform_override", {}))
     transform = {**global_transform, **override}
 
-    # A derivative file is itself the chosen composition. Do not apply the base
-    # source-image aspect/crop to it again. Preserve its explicit derivative aspect
-    # as metadata while leaving the pixels alone.
     derivative_aspect: str | None = None
     for operation in reversed(asset.get("operations", [])):
         if operation.get("type") in {"manual_crop", "face_crop"} and operation.get("aspect_ratio"):
             derivative_aspect = str(operation["aspect_ratio"])
             break
 
+    # A derived file already *is* the selected crop. Do not crop it again just
+    # because the project's base composition has an aspect policy.
     if asset.get("asset_kind") == "derived" and "aspect_ratio" not in override:
         if derivative_aspect:
             transform["aspect_ratio"] = derivative_aspect
@@ -47,8 +37,7 @@ def effective_transform(manifest: dict[str, Any], asset: dict[str, Any]) -> dict
     if aspect == "source":
         transform["crop_mode"] = "fit"
     elif "aspect_ratio" in override and "crop_mode" not in override:
-        # Choosing a different aspect for one image is an explicit composition
-        # exception. It must crop even when the global source policy is 'fit'.
+        # A per-image aspect override is an explicit request to reframe the image.
         transform["crop_mode"] = "fill"
 
     return transform
@@ -76,5 +65,33 @@ def crop_box(width: int, height: int, transform: dict[str, Any]) -> tuple[int, i
     return 0, top, crop_w, top + crop_h
 
 
+def face_detector():
+    missing: list[str] = []
+    errors: list[str] = []
+    for module in ("onnxruntime", "cv2", "insightface"):
+        try:
+            importlib.import_module(module)
+        except ModuleNotFoundError as exc:
+            missing.append(exc.name or module)
+        except Exception as exc:
+            errors.append(f"{module}: {type(exc).__name__}: {exc}")
+    if missing or errors:
+        detail = []
+        if missing:
+            detail.append("missing modules: " + ", ".join(sorted(set(missing))))
+        if errors:
+            detail.append("import errors: " + " | ".join(errors))
+        raise RuntimeError("Face detection runtime is not ready (" + "; ".join(detail) + ")")
+
+    try:
+        from insightface.app import FaceAnalysis
+        app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=["CPUExecutionProvider"])
+        app.prepare(ctx_id=-1)
+        return app
+    except Exception as exc:
+        raise RuntimeError(f"InsightFace buffalo_l initialization failed: {type(exc).__name__}: {exc}") from exc
+
+
 prep._effective_transform = effective_transform
 prep._crop_box = crop_box
+prep._face_detector = face_detector
