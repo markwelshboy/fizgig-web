@@ -58,6 +58,24 @@
 #per-image-v4 .inline-editor-controls:has(button.danger.secondary) .actions > button.secondary:not(.danger)::after {
   content: "Reset additional adjustments";
 }
+#per-image-v4 .inline-editor-controls .actions:has(button.primary:disabled) > button.secondary:not(.danger) {
+  opacity: .48;
+  pointer-events: none;
+}
+
+/* Keep the inheritance model visible without injecting or rewriting DOM nodes. */
+#per-image-v4 .prep-section-heading::after {
+  content: "Base Project Assets inherit the saved global preparation recipe. Derivatives already contain the preparation active when they were created; their controls add further adjustments on top of those baked pixels.";
+  grid-column: 1 / -1;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid #2b3d57;
+  border-radius: 9px;
+  background: #0a1422;
+  color: #91a4bd;
+  font-size: 11px;
+  line-height: 1.45;
+}
 
 /* Terminology cleanup in the final review ledger. */
 .dataset-final-summary .summary-ledger > div:nth-child(2) > span,
