@@ -1,6 +1,6 @@
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
 import { CaptionsPage } from "./pages/CaptionsPage";
-import { ImagePrepWorkbenchPage } from "./pages/ImagePrepWorkbenchPage";
+import { ImagePrepWorkbenchPageV2 } from "./pages/ImagePrepWorkbenchPageV2";
 import { PreferencesPage } from "./pages/PreferencesPage";
 import { SamplesPage } from "./pages/SamplesPage";
 import { StartPage } from "./pages/StartPage";
@@ -34,7 +34,7 @@ export default function App() {
         <NavLink to="/preferences" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>⚙ Preferences</NavLink>
         <div className="status"><i /> Ready</div>
       </aside>
-      <main className="content"><Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPage />} /><Route path="/captions" element={<CaptionsPage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes></main>
+      <main className="content"><Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV2 />} /><Route path="/captions" element={<CaptionsPage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes></main>
     </div>
   );
 }
