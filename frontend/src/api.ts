@@ -27,7 +27,11 @@ export type CaptioningOptions = {
         name: string;
         tasks: Record<string, QwenTask>;
         default_task: string;
+        default_model: string;
+        default_processor: string;
+        default_revision: string;
         supports_instruction_override: true;
+        supports_arbitrary_model: true;
       }
     | {
         id: "florence";
@@ -45,12 +49,21 @@ export type CaptionGenerateRequest = {
   provider: "qwen" | "florence";
   model?: string;
   model_path?: string;
+  processor?: string;
+  revision?: string;
   task?: string;
   instruction?: string;
   max_tokens?: number;
   trigger_word?: string;
   add_trigger_word?: boolean;
   save?: boolean;
+};
+
+export type Preferences = {
+  qwen_caption_model: string;
+  qwen_caption_processor: string;
+  qwen_caption_revision: string;
+  caption_model_dir: string;
 };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
@@ -106,4 +119,27 @@ export function generateCaption(datasetId: string, filename: string, request: Ca
 
 export function unloadCaptionModels() {
   return api<{ unloaded: string[] }>("/api/captioning/unload", { method: "POST" });
+}
+
+export function getPreferences() {
+  return api<Preferences>("/api/preferences");
+}
+
+export function savePreferences(preferences: Preferences) {
+  return api<Preferences>("/api/preferences", {
+    method: "PUT",
+    body: JSON.stringify(preferences),
+  });
+}
+
+export function downloadQwenModel(args: {
+  repo_id: string;
+  revision?: string;
+  model_dir?: string;
+  use_as_qwen_caption_model?: boolean;
+}) {
+  return api<{ repo_id: string; path: string; selected: boolean }>("/api/models/qwen/download", {
+    method: "POST",
+    body: JSON.stringify(args),
+  });
 }
