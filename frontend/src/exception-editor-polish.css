@@ -1,0 +1,80 @@
+.exception-semantics-banner {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #2b3d57;
+  border-radius: 10px;
+  background: #0a1422;
+  color: #91a4bd;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.exception-semantics-banner strong { color: #eef3ff; }
+.exception-semantics-banner .baked { color: #c4a7ff; }
+
+/* Give the exception editor enough horizontal/vertical room that labels, values and micro-buttons never collide. */
+#per-image-v4 .inline-editor-controls .tuning-grid {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 26px 34px;
+  margin-top: 10px;
+}
+#per-image-v4 .inline-editor-controls .tuning-slider {
+  gap: 10px;
+}
+#per-image-v4 .inline-editor-controls .slider-title {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 16px;
+  min-height: 20px;
+  padding: 0 2px;
+}
+#per-image-v4 .inline-editor-controls .slider-title strong {
+  min-width: 58px;
+  text-align: right;
+  padding-right: 2px;
+}
+#per-image-v4 .inline-editor-controls .slider-row {
+  grid-template-columns: 34px minmax(150px, 1fr) 34px;
+  gap: 12px;
+}
+#per-image-v4 .inline-editor-controls .micro-button {
+  width: 34px;
+  height: 30px;
+}
+
+/* Contextual reset wording, presentation-only; no DOM mutation/observer. */
+#per-image-v4 .inline-editor-controls .actions > button.secondary:not(.danger) {
+  min-width: 178px;
+  position: relative;
+  color: transparent;
+}
+#per-image-v4 .inline-editor-controls .actions > button.secondary:not(.danger)::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #e8eef9;
+  content: "Reset to global recipe";
+}
+#per-image-v4 .inline-editor-controls:has(button.danger.secondary) .actions > button.secondary:not(.danger)::after {
+  content: "Reset additional adjustments";
+}
+
+/* Terminology cleanup in the final review ledger. */
+.dataset-final-summary .summary-ledger > div:nth-child(2) > span,
+.dataset-final-summary .summary-ledger > div:nth-child(3) > span {
+  font-size: 0;
+}
+.dataset-final-summary .summary-ledger > div:nth-child(2) > span::before {
+  content: "Global preparation recipe";
+  font-size: 14px;
+}
+.dataset-final-summary .summary-ledger > div:nth-child(3) > span::before {
+  content: "Base asset exceptions";
+  font-size: 14px;
+}
+
+@media (max-width: 1050px) {
+  #per-image-v4 .inline-editor-controls .tuning-grid {
+    grid-template-columns: 1fr;
+  }
+}
