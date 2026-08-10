@@ -89,7 +89,8 @@
   pointer-events: none;
 }
 
-/* Stage 5 heading: overview gets its own clean row above the inheritance note. */
+/* Stage 5 heading: title/description, then a right-aligned one-line overview,
+   then the inheritance explanation. */
 #per-image-v4 > .prep-section-heading {
   grid-template-columns: 1fr;
   align-items: start;
@@ -97,10 +98,13 @@
 }
 #per-image-v4 > .prep-section-heading > .muted {
   grid-column: 1 / -1;
-  color: #f3f7ff;
-  font-weight: 600;
+  justify-self: end;
+  text-align: right;
+  color: #f7f9ff;
+  font-weight: 650;
   white-space: nowrap;
   line-height: 1.3;
+  margin: 0;
 }
 
 /* Keep the inheritance model visible without injecting or rewriting DOM nodes. */
@@ -115,6 +119,41 @@
   color: #91a4bd;
   font-size: 11px;
   line-height: 1.45;
+}
+
+/* Review thumbnails can switch from cover to contain on hover. Make that
+   discoverable with a small diagonal-expand affordance in the image corner. */
+.prep-image-wrap,
+#per-image-v4 .fixed-review-card {
+  position: relative;
+}
+.prep-image-wrap::after,
+#per-image-v4 .fixed-review-card::after {
+  content: "↗↙";
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid rgba(190, 154, 255, .75);
+  border-radius: 7px;
+  background: rgba(76, 29, 149, .88);
+  color: #efe6ff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+  opacity: .8;
+  pointer-events: none;
+}
+.prep-image-card:hover .prep-image-wrap::after,
+.processed-card:hover .fixed-review-card::after {
+  opacity: 1;
 }
 
 /* Keep every Stage 5 card the same height even when only some cards have an
