@@ -63,6 +63,20 @@ class PrepOperationCreate(BaseModel):
     operation: dict[str, Any] = Field(default_factory=dict)
 
 
+class TransformUpdate(BaseModel):
+    transform: dict[str, Any] = Field(default_factory=dict)
+
+
+class AssetTransformUpdate(BaseModel):
+    override: dict[str, Any] = Field(default_factory=dict)
+
+
+class ManualCropCreate(BaseModel):
+    filename: str
+    aspect_ratio: str = "1:1"
+    crop: dict[str, float] = Field(default_factory=dict)
+
+
 def _not_found(exc: Exception) -> HTTPException:
     return HTTPException(status_code=404, detail=str(exc))
 
@@ -130,6 +144,34 @@ def update_all_image_inclusion(project_id: str, revision_id: str, request: Inclu
         return image_prep_store.set_all_inclusion(project_id, revision_id, request.included)
     except FileNotFoundError as exc:
         raise _not_found(exc) from exc
+
+
+@router.put("/{project_id}/revisions/{revision_id}/prep/global-transform")
+def update_global_transform(project_id: str, revision_id: str, request: TransformUpdate) -> dict[str, Any]:
+    try:
+        return image_prep_store.set_global_transform(project_id, revision_id, request.transform)
+    except FileNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@router.put("/{project_id}/revisions/{revision_id}/prep/assets/{filename}/transform")
+def update_asset_transform(project_id: str, revision_id: str, filename: str, request: AssetTransformUpdate) -> dict[str, Any]:
+    try:
+        return image_prep_store.set_asset_transform(project_id, revision_id, filename, request.override)
+    except FileNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@router.post("/{project_id}/revisions/{revision_id}/prep/manual-crops")
+def create_manual_crop(project_id: str, revision_id: str, request: ManualCropCreate) -> dict[str, Any]:
+    try:
+        return image_prep_store.create_manual_crop(project_id, revision_id, request.filename, request.crop, request.aspect_ratio)
+    except FileNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{project_id}/revisions/{revision_id}/prep/operations")
