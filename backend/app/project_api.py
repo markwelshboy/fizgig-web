@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from .image_prep import image_prep_store
 from .prepared_derivatives import prepared_derivative_service
 from .project_captions import project_caption_store
+from .project_policy import project_policy_store
 from .projects import project_store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -18,6 +19,8 @@ class RunCreate(BaseModel): name: str; model_family: str; dataset_revision: str;
 class RunEventCreate(BaseModel): type: str; payload: dict[str, Any] = Field(default_factory=dict)
 class ArtifactCreate(BaseModel): type: str; path: str; metadata: dict[str, Any] = Field(default_factory=dict)
 class ProjectCaptionUpdate(BaseModel): caption: str; reason: str = "manual_edit"; metadata: dict[str, Any] = Field(default_factory=dict); materialize: bool = False; run_id: str | None = None
+class CaptionValidationPolicyUpdate(BaseModel): protected_phrases: list[str] | None = None; spellcheck_enabled: bool | None = None; accepted_words: list[str] | None = None
+class AssetPolicyUpdate(BaseModel): training_policy: str | None = None; auto_recaption_policy: str | None = None
 class InclusionUpdate(BaseModel): filenames: list[str] = Field(default_factory=list); included: bool
 class PrepOperationCreate(BaseModel): filenames: list[str] = Field(default_factory=list); operation: dict[str, Any] = Field(default_factory=dict)
 class TransformUpdate(BaseModel): transform: dict[str, Any] = Field(default_factory=dict)
@@ -55,8 +58,6 @@ def _restrict_project_to_selection(result: dict[str, Any], selected: list[str]) 
         for path in files_dir.iterdir():
             if not path.is_file():
                 continue
-            owner = path.name if path.suffix.lower() != ".txt" else path.with_suffix("").name
-            # Captions are paired by image stem; retain only captions belonging to selected images.
             selected_stems = {Path(name).stem for name in wanted}
             if path.suffix.lower() == ".txt":
                 keep = path.stem in selected_stems
@@ -109,6 +110,22 @@ def create_revision(project_id: str, request: RevisionCreate):
 def get_revision(project_id: str, revision_id: str):
     try: return project_store.get_revision(project_id, revision_id)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
+@router.get("/{project_id}/revisions/{revision_id}/policy")
+def get_revision_policy(project_id: str, revision_id: str):
+    try: return project_policy_store.get(project_id, revision_id)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+@router.put("/{project_id}/revisions/{revision_id}/policy/caption-validation")
+def update_caption_validation_policy(project_id: str, revision_id: str, request: CaptionValidationPolicyUpdate):
+    try:
+        return project_policy_store.update_validation(project_id, revision_id, protected_phrases=request.protected_phrases, spellcheck_enabled=request.spellcheck_enabled, accepted_words=request.accepted_words)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+@router.put("/{project_id}/revisions/{revision_id}/policy/assets/{filename}")
+def update_asset_policy(project_id: str, revision_id: str, filename: str, request: AssetPolicyUpdate):
+    try:
+        return project_policy_store.update_asset(project_id, revision_id, filename, training_policy=request.training_policy, auto_recaption_policy=request.auto_recaption_policy)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 @router.get("/{project_id}/revisions/{revision_id}/prep")
 def get_image_prep_state(project_id: str, revision_id: str):
     try: return image_prep_store.state(project_id, revision_id)
@@ -182,7 +199,9 @@ def create_run(project_id: str, request: RunCreate):
     try:
         project_caption_store.materialize_revision(project_id, request.dataset_revision)
         run = project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=request.config)
-        return image_prep_store.materialize_run_dataset(project_id, request.dataset_revision, run)
+        run = image_prep_store.materialize_run_dataset(project_id, request.dataset_revision, run)
+        project_policy_store.materialize_for_run(project_id, request.dataset_revision, run)
+        return run
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 @router.get("/{project_id}/runs/{run_id}")
