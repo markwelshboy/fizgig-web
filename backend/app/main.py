@@ -13,10 +13,13 @@ from .project_api import router as project_router
 from .settings import save_settings, settings_dict
 from . import image_prep as image_prep_module
 from .crop_geometry import crop_box as scalable_crop_box
+from .prepared_derivatives import _effective_transform as prepared_effective_transform
 
-# Image-prep functions resolve _crop_box dynamically. Patch in the shared scalable
-# geometry so previews, analysis, and run materialization all use crop_scale.
+# Image-prep functions resolve these helpers dynamically. Patch in the shared
+# scalable crop geometry and baked-derivative-aware transform semantics so
+# previews, analysis, and run materialization stay consistent.
 image_prep_module._crop_box = scalable_crop_box
+image_prep_module._effective_transform = prepared_effective_transform
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
 app.include_router(project_router)
