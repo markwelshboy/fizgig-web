@@ -11,6 +11,12 @@ from pydantic import BaseModel, Field
 from .captioning import add_trigger, caption_service, download_qwen_snapshot
 from .project_api import router as project_router
 from .settings import save_settings, settings_dict
+from . import image_prep as image_prep_module
+from .crop_geometry import crop_box as scalable_crop_box
+
+# Image-prep functions resolve _crop_box dynamically. Patch in the shared scalable
+# geometry so previews, analysis, and run materialization all use crop_scale.
+image_prep_module._crop_box = scalable_crop_box
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
 app.include_router(project_router)
@@ -98,24 +104,8 @@ def health() -> dict[str, str]:
 @app.get("/api/model-families")
 def model_families() -> list[dict[str, object]]:
     return [
-        {
-            "id": "krea2",
-            "name": "Krea 2",
-            "features": {
-                "per_image_loss": True,
-                "per_image_lr": True,
-                "auto_recaption": True,
-            },
-        },
-        {
-            "id": "klein",
-            "name": "Klein 9B",
-            "features": {
-                "per_image_loss": False,
-                "per_image_lr": False,
-                "auto_recaption": False,
-            },
-        },
+        {"id": "krea2", "name": "Krea 2", "features": {"per_image_loss": True, "per_image_lr": True, "auto_recaption": True}},
+        {"id": "klein", "name": "Klein 9B", "features": {"per_image_loss": False, "per_image_lr": False, "auto_recaption": False}},
     ]
 
 
@@ -139,11 +129,7 @@ def update_preferences(update: PreferencesUpdate) -> dict[str, str]:
 @app.post("/api/models/qwen/download")
 def download_qwen_model(request: ModelDownloadRequest) -> dict[str, object]:
     try:
-        path = download_qwen_snapshot(
-            request.repo_id,
-            revision=request.revision,
-            model_dir=request.model_dir,
-        )
+        path = download_qwen_snapshot(request.repo_id, revision=request.revision, model_dir=request.model_dir)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
@@ -176,10 +162,7 @@ def inspect_dataset(request: DatasetRequest) -> dict[str, object]:
     if not dataset.is_dir():
         raise HTTPException(status_code=404, detail=f"Dataset folder does not exist: {dataset}")
 
-    images = sorted(
-        (path for path in dataset.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS),
-        key=lambda path: path.name.lower(),
-    )
+    images = sorted((path for path in dataset.iterdir() if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS), key=lambda path: path.name.lower())
     if not images:
         raise HTTPException(status_code=400, detail="No supported images found in dataset folder")
 
@@ -187,15 +170,7 @@ def inspect_dataset(request: DatasetRequest) -> dict[str, object]:
     _DATASETS[dataset_id] = dataset
     records = [_image_record(dataset_id, image) for image in images]
     caption_count = sum(1 for record in records if record["has_caption"])
-
-    return {
-        "id": dataset_id,
-        "path": str(dataset),
-        "image_count": len(records),
-        "caption_count": caption_count,
-        "missing_caption_count": len(records) - caption_count,
-        "images": records,
-    }
+    return {"id": dataset_id, "path": str(dataset), "image_count": len(records), "caption_count": caption_count, "missing_caption_count": len(records) - caption_count, "images": records}
 
 
 @app.get("/api/datasets/{dataset_id}")
@@ -215,10 +190,7 @@ def get_caption(dataset_id: str, filename: str) -> dict[str, str]:
     dataset = _get_dataset(dataset_id)
     image = _safe_image(dataset, filename)
     caption_path = image.with_suffix(".txt")
-    return {
-        "filename": image.name,
-        "caption": caption_path.read_text(encoding="utf-8").strip() if caption_path.is_file() else "",
-    }
+    return {"filename": image.name, "caption": caption_path.read_text(encoding="utf-8").strip() if caption_path.is_file() else ""}
 
 
 @app.put("/api/datasets/{dataset_id}/captions/{filename}")
@@ -256,9 +228,4 @@ def generate_caption(dataset_id: str, filename: str, request: CaptionGenerateReq
     if request.save:
         caption = _write_caption(image, caption)
 
-    return {
-        "filename": image.name,
-        "caption": caption,
-        "saved": request.save,
-        "provider": request.provider,
-    }
+    return {"filename": image.name, "caption": caption, "saved": request.save, "provider": request.provider}
