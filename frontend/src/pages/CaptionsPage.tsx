@@ -385,10 +385,13 @@ export function CaptionsPage() {
               {provider === "qwen" && <button type="button" className="caption-preset-edit" onClick={openPresetEditor} disabled={!activeQwenPreset}>View/Edit</button>}
             </div>
           </div>
-          <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord})</span></label>
+          <label className="caption-token-primary">Max Tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label>
         </div>
 
-        <div className="caption-ai-actions caption-ai-actions-primary"><button className="primary" onClick={generateCandidate} disabled={generating}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div>
+        <div className="caption-ai-action-row">
+          <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord})</span></label>
+          <div className="caption-ai-actions caption-ai-actions-primary"><button className="primary" onClick={generateCandidate} disabled={generating}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div>
+        </div>
 
         <label className="caption-candidate-label">Generated Candidate<textarea value={aiCandidate} onChange={(event) => setAiCandidate(event.target.value)} placeholder="Generate a candidate to compare with the Working Caption above." /></label>
         <div className="caption-candidate-actions"><button className="secondary" disabled={!aiCandidate.trim()} onClick={() => navigator.clipboard?.writeText(aiCandidate)}>Copy Candidate</button><button className="primary" disabled={!aiCandidate.trim()} onClick={() => { setCaptionDraft(aiCandidate); setMessage("AI candidate copied into Working Caption. Save Caption to commit it."); }}>Use as Working Caption</button></div>
@@ -400,7 +403,6 @@ export function CaptionsPage() {
             <label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /></label>
             <div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div>
           </> : <label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label>}
-          <label className="caption-token-field">Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label>
         </div>}
       </div>}
     </section>}
