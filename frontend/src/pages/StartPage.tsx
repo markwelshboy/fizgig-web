@@ -90,12 +90,40 @@ export function StartPage() {
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to prepare working dataset"); } finally { setLoading(false); }
   }
 
+  const importedCaptionCount = dataset?.caption_count ?? 0;
+  const importedImageCount = dataset?.image_count ?? 0;
+  const needCaptionCount = Math.max(0, importedImageCount - importedCaptionCount);
+
   return <div className="stack">
     <header className="page-header"><div><p className="eyebrow">Projects</p><h1>{project ? project.name : "Create or Open a Training Project"}</h1><p className="muted">Your external dataset remains the canonical source. Fizgig Web snapshots it for reproducibility and works only on project-owned scratch copies.</p></div>{project && <div className="project-identity"><span>Project ID</span><strong>{project.id}</strong></div>}</header>
     {!project && <section className="panel stack"><div className="card-title">New Project</div><div className="form-row"><label>Project name<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setError(""); }} placeholder="sH1VX identity experiments" />{duplicateName && <small className="status-suspect">A project with this display name already exists.</small>}</label><label>Trigger word<input value={triggerWord} onChange={(event) => setTriggerWord(event.target.value)} /></label></div><label>External source dataset<input value={sourcePath} onChange={(event) => setSourcePath(event.target.value)} /></label><div className="notice">The source folder is never modified. Creating a project makes a frozen import snapshot inside the project so every experiment can be reproduced later.</div><div className="actions"><button className="primary" onClick={onCreateProject} disabled={loading || Boolean(duplicateName)}>{loading ? "Creating…" : "Create Project"}</button></div></section>}
     {!project && recentProjects.length > 0 && <section className="panel stack"><div className="prep-section-heading"><div><div className="card-title">Recent Projects</div><p className="muted">Project ID is the immutable provenance key. Removing an item only clears it from this browser's recent list.</p></div><button className="secondary" onClick={clearRecentProjects}>Clear recent projects</button></div><div className="project-list">{recentProjects.map((item) => { const count = workingDatasetCount(item); return <div className="project-row-shell" key={item.id}><button className="project-row" onClick={() => openProject(item)} disabled={loading}><span><strong>{item.name}</strong><small className="project-id-line">ID: {item.id}</small><small>{item.external_source.path}</small></span><span className="muted">{count} working dataset{count === 1 ? "" : "s"} · {item.runs.length} runs</span></button><button className="recent-remove" onClick={() => dismissRecent(item.id)} title="Remove from recent projects" aria-label={`Remove ${item.name} (${item.id}) from recent projects`}>×</button></div>; })}</div></section>}
     {!project && projects.length > 0 && recentProjects.length === 0 && <section className="panel"><p className="muted">Recent project list is cleared for this browser. Existing project files remain under the configured projects directory.</p><button className="secondary" onClick={() => persistDismissed(new Set())}>Show projects again</button></section>}
-    {project && <><section className="panel stack"><div className="card-title">Project Source</div><div className="summary-grid"><div><span>Project ID</span><strong>{project.id}</strong></div><div><span>External canonical source</span><strong>{project.external_source.path}</strong></div><div><span>Frozen import</span><strong>{project.current_import}</strong></div><div><span>Working revision</span><strong>{revision?.id ?? project.current_dataset_revision ?? "Not selected"}</strong></div></div><div className="notice success">Fizgig Web will not write to the external source. Captions and image changes belong to this project's working revision and history.</div></section><section className="panel stack"><div className="card-title">Training Direction</div><div className="model-grid"><button className={`model-card ${modelFamily === "krea2" ? "selected" : ""}`} onClick={() => setModelFamily("krea2")}><strong>Krea 2</strong><span>Per-image loss, adaptive LR, auto-recaption</span></button><button className={`model-card ${modelFamily === "klein" ? "selected" : ""}`} onClick={() => setModelFamily("klein")}><strong>Klein</strong><span>Shared project/dataset workflow with Klein training configuration</span></button></div>{dataset && <div className="summary-grid"><div><span>Images</span><strong>{dataset.image_count}</strong></div><div><span>Working captions</span><strong>{revision?.assets.filter((asset) => asset.caption.trim()).length ?? 0}</strong></div><div><span>Need captions</span><strong>{revision?.assets.filter((asset) => !asset.caption.trim()).length ?? 0}</strong></div></div>}<div className="actions"><button className="primary" onClick={continueToPrep} disabled={loading}>{loading ? "Preparing…" : "Continue to Image Prep"}</button></div></section></>}
+    {project && <>
+      <section className="panel stack project-source-panel">
+        <div className="card-title">Project Source</div>
+        <div className="summary-ledger project-source-ledger">
+          <div><span>Project ID</span><strong>{project.id}</strong><small>immutable provenance key</small></div>
+          <div><span>External canonical source</span><strong>{project.external_source.path}</strong><small>read-only to Fizgig Web</small></div>
+          <div><span>Frozen import</span><strong>{project.current_import}</strong><small>reproducible source snapshot</small></div>
+          <div><span>Working revision</span><strong>{revision?.id ?? project.current_dataset_revision ?? "Not selected"}</strong><small>{revision?.name ?? "choose a training direction"}</small></div>
+        </div>
+        <div className="notice success">Fizgig Web will not write to the external source. Captions and image changes belong to this project's working revision and history.</div>
+      </section>
+      <section className="panel stack">
+        <div className="card-title">Training Direction</div>
+        <div className="model-grid training-direction-grid">
+          <button className={`model-card ${modelFamily === "krea2" ? "selected" : ""}`} onClick={() => setModelFamily("krea2")}><strong>Krea 2</strong><span>Per-image loss, adaptive LR, auto-recaption</span></button>
+          <button className={`model-card ${modelFamily === "klein" ? "selected" : ""}`} onClick={() => setModelFamily("klein")}><strong>Klein</strong><span>Shared project/dataset workflow with Klein training configuration</span></button>
+        </div>
+        {dataset && <div className="summary-ledger source-accounting-ledger">
+          <div><span>Imported Source Images</span><strong>{importedImageCount}</strong><small>images in the frozen import</small></div>
+          <div><span>Imported Associated Captions</span><strong>{importedCaptionCount}</strong><small>matching image/caption filenames</small></div>
+          <div><span>Images Requiring Captioning</span><strong>{needCaptionCount}</strong><small>no matching imported caption</small></div>
+        </div>}
+        <div className="actions"><button className="primary" onClick={continueToPrep} disabled={loading}>{loading ? "Preparing…" : "Continue to Image Prep"}</button></div>
+      </section>
+    </>}
     {error && <div className="notice error">{error}</div>}
   </div>;
 }
