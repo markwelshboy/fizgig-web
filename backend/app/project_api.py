@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from typing import Any
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 from .image_prep import image_prep_store
+from .prepared_derivatives import prepared_derivative_service
 from .project_captions import project_caption_store
 from .projects import project_store
 
@@ -71,20 +72,30 @@ def update_training_resolution(project_id: str, revision_id: str, request: Train
 def update_asset_transform(project_id: str, revision_id: str, filename: str, request: AssetTransformUpdate):
     try: return image_prep_store.set_asset_transform(project_id, revision_id, filename, request.override)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
+@router.get("/{project_id}/revisions/{revision_id}/prep/assets/{filename}/prepared-preview")
+def prepared_asset_preview(project_id: str, revision_id: str, filename: str):
+    try: return Response(content=prepared_derivative_service.preview_png(project_id, revision_id, filename), media_type="image/png", headers={"Cache-Control": "no-store"})
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
+@router.delete("/{project_id}/revisions/{revision_id}/prep/assets/{filename}")
+def delete_derivative(project_id: str, revision_id: str, filename: str):
+    try: return prepared_derivative_service.delete_derivative(project_id, revision_id, filename)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 @router.post("/{project_id}/revisions/{revision_id}/prep/manual-crops")
 def create_manual_crop(project_id: str, revision_id: str, request: ManualCropCreate):
-    try: return image_prep_store.create_manual_crop(project_id, revision_id, request.filename, request.crop, request.aspect_ratio)
+    try: return prepared_derivative_service.create_manual_crop(project_id, revision_id, request.filename, request.crop, request.aspect_ratio)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 @router.post("/{project_id}/revisions/{revision_id}/prep/face-crops/propose")
 def propose_face_crops(project_id: str, revision_id: str, request: FaceCropProposalRequest):
-    try: return image_prep_store.propose_face_crops(project_id, revision_id, request.filenames, request.aspect_ratio, request.padding_percent)
+    try: return prepared_derivative_service.propose_face_crops(project_id, revision_id, request.filenames, request.aspect_ratio, request.padding_percent)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
 @router.post("/{project_id}/revisions/{revision_id}/prep/face-crops/accept")
 def accept_face_crops(project_id: str, revision_id: str, request: FaceCropAcceptRequest):
-    try: return image_prep_store.accept_face_crops(project_id, revision_id, request.proposals)
+    try: return prepared_derivative_service.accept_face_crops(project_id, revision_id, request.proposals)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
 @router.post("/{project_id}/revisions/{revision_id}/prep/operations")
