@@ -11,30 +11,54 @@
 .exception-semantics-banner strong { color: #eef3ff; }
 .exception-semantics-banner .baked { color: #c4a7ff; }
 
-/* Give the exception editor enough horizontal/vertical room that labels, values and micro-buttons never collide. */
+/* Exception controls: label, value, then the slider row. Keeping the value on
+   its own line avoids collisions with the +/- micro controls at any width. */
 #per-image-v4 .inline-editor-controls .tuning-grid {
   grid-template-columns: repeat(2, minmax(260px, 1fr));
   gap: 26px 34px;
   margin-top: 10px;
 }
 #per-image-v4 .inline-editor-controls .tuning-slider {
-  gap: 10px;
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 8px;
+  min-width: 0;
 }
 #per-image-v4 .inline-editor-controls .slider-title {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 16px;
-  min-height: 20px;
+  grid-template-columns: 1fr;
+  gap: 3px;
+  min-height: 34px;
   padding: 0 2px;
+  align-content: start;
+}
+#per-image-v4 .inline-editor-controls .slider-title > span {
+  display: block;
 }
 #per-image-v4 .inline-editor-controls .slider-title strong {
+  display: block;
+  justify-self: start;
   min-width: 58px;
-  text-align: right;
-  padding-right: 2px;
+  padding: 2px 7px;
+  border: 1px solid #2d415c;
+  border-radius: 6px;
+  background: #0a1625;
+  color: #edf3ff;
+  text-align: center;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
 }
 #per-image-v4 .inline-editor-controls .slider-row {
+  display: grid;
   grid-template-columns: 34px minmax(150px, 1fr) 34px;
+  align-items: center;
   gap: 12px;
+  min-width: 0;
+}
+#per-image-v4 .inline-editor-controls .slider-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
 }
 #per-image-v4 .inline-editor-controls .micro-button {
   width: 34px;
@@ -43,7 +67,7 @@
 
 /* Contextual reset wording, presentation-only; no DOM mutation/observer. */
 #per-image-v4 .inline-editor-controls .actions > button.secondary:not(.danger) {
-  min-width: 178px;
+  min-width: 132px;
   position: relative;
   color: transparent;
 }
@@ -52,11 +76,13 @@
   inset: 0;
   display: grid;
   place-items: center;
+  padding: 0 10px;
   color: #e8eef9;
-  content: "Reset to global recipe";
+  content: "Reset to global";
+  white-space: nowrap;
 }
 #per-image-v4 .inline-editor-controls:has(button.danger.secondary) .actions > button.secondary:not(.danger)::after {
-  content: "Reset additional adjustments";
+  content: "Reset adjustment";
 }
 #per-image-v4 .inline-editor-controls .actions:has(button.primary:disabled) > button.secondary:not(.danger) {
   opacity: .48;
