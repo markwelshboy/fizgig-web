@@ -21,8 +21,10 @@
 
 .face-proposal-stage { position: relative; aspect-ratio: 1 / 1; overflow: hidden; display: grid; place-items: center; background: #07101c; }
 .face-proposal-stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.face-proposal-native { position: relative; width: 100%; max-height: 290px; overflow: hidden; display: grid; place-items: center; background: #07101c; }
-.face-proposal-native img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* The proposal canvas itself must retain the source aspect. A max-height here used
+   to squash portrait canvases while leaving percentage crop coordinates unchanged. */
+.face-proposal-native { position: relative; width: 100%; overflow: hidden; display: block; background: #07101c; }
+.face-proposal-native img { width: 100%; height: 100%; object-fit: fill; display: block; }
 .face-crop-box { position: absolute; border: 2px solid #9da9ff; box-shadow: 0 0 0 9999px rgba(3,8,15,.48), 0 0 0 1px rgba(255,255,255,.28) inset; pointer-events: none; }
 .face-proposal-card:hover .face-proposal-native { overflow: visible; z-index: 6; }
 .face-proposal-card:hover .face-crop-box { box-shadow: 0 0 0 9999px rgba(3,8,15,.18), 0 0 0 1px rgba(255,255,255,.42) inset; }
@@ -58,6 +60,10 @@
 .asset-subheading { display: flex; align-items: center; gap: 10px; margin-top: 4px; padding-top: 10px; border-top: 1px solid #22344b; color: #dbe5f7; font-weight: 700; }
 .asset-subheading span { color: #8093ad; font-size: 11px; font-weight: 500; }
 .derivative-grid .prep-image-card { border-color: #3d5172; }
+.derivative-card-shell { position: relative; min-width: 0; }
+.derivative-card-shell > .prep-image-card { width: 100%; height: 100%; }
+.derivative-delete { position: absolute; z-index: 8; right: 7px; bottom: 7px; width: 26px; height: 26px; padding: 0; display: grid; place-items: center; border-radius: 7px; border: 1px solid #70404b; background: rgba(46,19,28,.94); color: #fda4af; font-size: 15px; }
+.derivative-delete:hover { background: #4a1722; color: white; border-color: #be5b70; }
 .provenance-counts span { min-width: 76px; }
 .project-identity { display: grid; justify-items: end; gap: 2px; color: #8395ad; font-size: 10px; }
 .project-identity strong, .project-id-line { color: #b2c1d7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
