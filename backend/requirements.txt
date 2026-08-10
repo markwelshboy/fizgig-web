@@ -5,6 +5,11 @@ Pillow
 huggingface_hub
 accelerate
 transformers>=4.57.0
+insightface
+onnxruntime
+opencv-python-headless
+numpy
 
 # torch is intentionally supplied by the target Fizgig/CUDA runtime rather than installed here.
 # Qwen3-VL captioning is now a standalone Transformers VLM and no longer reuses Krea's training encoder.
+# InsightFace buffalo_l runs on CPU for Image Prep face-crop proposals, matching upstream Fizgig's detector strategy.
