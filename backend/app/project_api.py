@@ -21,6 +21,8 @@ class TransformUpdate(BaseModel): transform: dict[str, Any] = Field(default_fact
 class AssetTransformUpdate(BaseModel): override: dict[str, Any] = Field(default_factory=dict)
 class TrainingResolutionUpdate(BaseModel): policy: dict[str, Any] = Field(default_factory=dict)
 class ManualCropCreate(BaseModel): filename: str; aspect_ratio: str = "1:1"; crop: dict[str, float] = Field(default_factory=dict)
+class FaceCropProposalRequest(BaseModel): filenames: list[str] = Field(default_factory=list); aspect_ratio: str = "1:1"; padding_percent: float = Field(default=60.0, ge=0, le=400)
+class FaceCropAcceptRequest(BaseModel): proposals: list[dict[str, Any]] = Field(default_factory=list)
 
 def _not_found(exc: Exception) -> HTTPException: return HTTPException(status_code=404, detail=str(exc))
 
@@ -75,6 +77,16 @@ def create_manual_crop(project_id: str, revision_id: str, request: ManualCropCre
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+@router.post("/{project_id}/revisions/{revision_id}/prep/face-crops/propose")
+def propose_face_crops(project_id: str, revision_id: str, request: FaceCropProposalRequest):
+    try: return image_prep_store.propose_face_crops(project_id, revision_id, request.filenames, request.aspect_ratio, request.padding_percent)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
+@router.post("/{project_id}/revisions/{revision_id}/prep/face-crops/accept")
+def accept_face_crops(project_id: str, revision_id: str, request: FaceCropAcceptRequest):
+    try: return image_prep_store.accept_face_crops(project_id, revision_id, request.proposals)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
 @router.post("/{project_id}/revisions/{revision_id}/prep/operations")
 def queue_image_prep_operation(project_id: str, revision_id: str, request: PrepOperationCreate):
     try: return image_prep_store.append_operation(project_id, revision_id, request.filenames, request.operation)
