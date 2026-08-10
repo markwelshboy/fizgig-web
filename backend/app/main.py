@@ -8,7 +8,8 @@ from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .captioning import add_trigger, caption_service
+from .captioning import add_trigger, caption_service, download_qwen_snapshot
+from .settings import save_settings, settings_dict
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
 
@@ -28,12 +29,28 @@ class CaptionGenerateRequest(BaseModel):
     provider: str = "qwen"
     model: str | None = None
     model_path: str | None = None
+    processor: str | None = None
+    revision: str | None = None
     task: str | None = None
     instruction: str | None = None
     max_tokens: int | None = Field(default=None, ge=16, le=1024)
     trigger_word: str = ""
     add_trigger_word: bool = True
     save: bool = False
+
+
+class PreferencesUpdate(BaseModel):
+    qwen_caption_model: str | None = None
+    qwen_caption_processor: str | None = None
+    qwen_caption_revision: str | None = None
+    caption_model_dir: str | None = None
+
+
+class ModelDownloadRequest(BaseModel):
+    repo_id: str
+    revision: str = ""
+    model_dir: str = ""
+    use_as_qwen_caption_model: bool = True
 
 
 def _dataset_id(path: Path) -> str:
@@ -98,6 +115,47 @@ def model_families() -> list[dict[str, object]]:
             },
         },
     ]
+
+
+@app.get("/api/preferences")
+def get_preferences() -> dict[str, str]:
+    return settings_dict()
+
+
+@app.put("/api/preferences")
+def update_preferences(update: PreferencesUpdate) -> dict[str, str]:
+    current = save_settings(update.model_dump(exclude_none=True))
+    caption_service.unload()
+    return {
+        "qwen_caption_model": current.qwen_caption_model,
+        "qwen_caption_processor": current.qwen_caption_processor,
+        "qwen_caption_revision": current.qwen_caption_revision,
+        "caption_model_dir": current.caption_model_dir,
+    }
+
+
+@app.post("/api/models/qwen/download")
+def download_qwen_model(request: ModelDownloadRequest) -> dict[str, object]:
+    try:
+        path = download_qwen_snapshot(
+            request.repo_id,
+            revision=request.revision,
+            model_dir=request.model_dir,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Model download failed: {type(exc).__name__}: {exc}") from exc
+
+    if request.use_as_qwen_caption_model:
+        save_settings({
+            "qwen_caption_model": path,
+            "qwen_caption_processor": "",
+            "qwen_caption_revision": "",
+            **({"caption_model_dir": request.model_dir} if request.model_dir else {}),
+        })
+        caption_service.unload()
+    return {"repo_id": request.repo_id, "path": path, "selected": request.use_as_qwen_caption_model}
 
 
 @app.get("/api/captioning/options")
@@ -178,6 +236,8 @@ def generate_caption(dataset_id: str, filename: str, request: CaptionGenerateReq
             image_path=image,
             model=request.model,
             model_path=request.model_path,
+            processor=request.processor,
+            revision=request.revision,
             task=request.task,
             instruction=request.instruction,
             max_tokens=request.max_tokens,
