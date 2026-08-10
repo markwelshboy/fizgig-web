@@ -184,7 +184,7 @@
 
 .caption-ai-primary-controls {
   display: grid;
-  grid-template-columns: minmax(190px, 0.55fr) minmax(360px, 1.45fr) auto;
+  grid-template-columns: minmax(190px, 0.7fr) minmax(360px, 1.55fr) minmax(130px, 0.55fr);
   gap: 14px;
   align-items: end;
 }
@@ -194,9 +194,14 @@
   min-width: 0;
 }
 
-.caption-control-field {
+.caption-control-field,
+.caption-token-primary {
   display: grid;
   gap: 7px;
+}
+
+.caption-token-primary input {
+  width: 100%;
 }
 
 .caption-control-label {
@@ -238,9 +243,17 @@
   background: rgba(109, 40, 217, 0.94);
 }
 
+.caption-ai-action-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
 .caption-trigger-check {
-  min-height: 40px;
-  padding-bottom: 6px;
+  min-height: auto;
+  padding-bottom: 0;
   white-space: nowrap;
 }
 
@@ -285,10 +298,6 @@
   border: 1px solid var(--border);
   border-radius: 10px;
   background: rgba(7, 17, 30, 0.3);
-}
-
-.caption-token-field {
-  max-width: 220px;
 }
 
 .caption-modal-backdrop {
@@ -558,13 +567,7 @@
   }
 
   .caption-ai-primary-controls {
-    grid-template-columns: minmax(180px, 0.7fr) minmax(300px, 1.3fr);
-  }
-
-  .caption-trigger-check {
-    grid-column: 1 / -1;
-    min-height: auto;
-    padding-bottom: 0;
+    grid-template-columns: minmax(170px, 0.7fr) minmax(280px, 1.3fr) minmax(120px, 0.5fr);
   }
 
   .caption-browser-grid,
@@ -594,12 +597,13 @@
     display: none;
   }
 
-  .caption-trigger-check {
-    grid-column: auto;
+  .caption-ai-action-row {
+    align-items: stretch;
+    flex-direction: column;
   }
 
-  .caption-token-field {
-    max-width: none;
+  .caption-ai-actions-primary {
+    justify-content: flex-start;
   }
 
   .caption-preset-modal {
