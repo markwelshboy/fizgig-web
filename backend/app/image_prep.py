@@ -40,7 +40,7 @@ def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
 
 
 DEFAULT_GLOBAL_TRANSFORM: dict[str, Any] = {
-    "aspect_ratio": "16:9", "crop_mode": "fill", "crop_x": 0.5, "crop_y": 0.5,
+    "aspect_ratio": "source", "crop_mode": "fit", "crop_x": 0.5, "crop_y": 0.5,
     "exposure": 0.0, "brightness": 0.0, "contrast": 0.0, "gamma": 1.0,
 }
 DEFAULT_TRAINING_RESOLUTION: dict[str, Any] = {
@@ -57,28 +57,42 @@ def _image_dimensions(path: Path) -> tuple[int, int]:
         return image.size
 
 
-def _parse_aspect(value: str) -> float:
+def _aspect_units(value: str) -> tuple[int, int]:
     try:
-        left, right = str(value).split(":", 1); ratio = float(left) / float(right)
-        return ratio if ratio > 0 else 1.0
+        left, right = str(value).split(":", 1)
+        w, h = int(left), int(right)
+        if w <= 0 or h <= 0:
+            raise ValueError
+        g = math.gcd(w, h)
+        return w // g, h // g
     except Exception:
-        return 1.0
+        return 1, 1
+
+
+def _parse_aspect(value: str) -> float:
+    w, h = _aspect_units(value)
+    return w / h
 
 
 def _effective_transform(manifest: dict[str, Any], asset: dict[str, Any]) -> dict[str, Any]:
     transform = {**DEFAULT_GLOBAL_TRANSFORM, **manifest.get("global_transform", {}), **asset.get("transform_override", {})}
     if "aspect_ratio" not in asset.get("transform_override", {}):
         for operation in reversed(asset.get("operations", [])):
-            if operation.get("type") == "manual_crop" and operation.get("aspect_ratio"):
-                transform["aspect_ratio"] = operation["aspect_ratio"]; break
+            if operation.get("type") in {"manual_crop", "face_crop"} and operation.get("aspect_ratio"):
+                transform["aspect_ratio"] = operation["aspect_ratio"]
+                transform["crop_mode"] = "fit"
+                break
     return transform
 
 
 def _crop_box(width: int, height: int, transform: dict[str, Any]) -> tuple[int, int, int, int]:
-    if transform.get("crop_mode", "fill") != "fill": return 0, 0, width, height
-    target = _parse_aspect(str(transform.get("aspect_ratio", "1:1"))); source = width / max(1, height)
+    aspect = str(transform.get("aspect_ratio", "source"))
+    if aspect == "source" or transform.get("crop_mode", "fit") != "fill":
+        return 0, 0, width, height
+    target = _parse_aspect(aspect); source = width / max(1, height)
     pos_x = max(0.0, min(1.0, float(transform.get("crop_x", 0.5)))); pos_y = max(0.0, min(1.0, float(transform.get("crop_y", 0.5))))
-    if abs(source - target) < 1e-6: return 0, 0, width, height
+    if abs(source - target) < 1e-6:
+        return 0, 0, width, height
     if source > target:
         crop_h = height; crop_w = max(1, min(width, round(height * target))); left = round((width - crop_w) * pos_x)
         return left, 0, left + crop_w, crop_h
@@ -125,23 +139,44 @@ def _materialize_transform(src: Path, dst: Path, transform: dict[str, Any]) -> d
         return {"source_file_size": [file_width, file_height], "crop_box": list(box), "materialized_size": [image.width, image.height], "transform": transform}
 
 
+def _exact_aspect_box(image_size: tuple[int, int], center: tuple[float, float], required_size: tuple[float, float], aspect_ratio: str) -> tuple[int, int, int, int]:
+    """Return the largest needed exact-ratio integer crop that fits wholly inside the source."""
+    img_w, img_h = image_size; unit_w, unit_h = _aspect_units(aspect_ratio)
+    req_w, req_h = max(1.0, required_size[0]), max(1.0, required_size[1])
+    needed_k = max(1, math.ceil(max(req_w / unit_w, req_h / unit_h)))
+    max_k = max(1, min(img_w // unit_w, img_h // unit_h))
+    k = min(needed_k, max_k)
+    crop_w, crop_h = unit_w * k, unit_h * k
+    cx, cy = center
+    left = int(round(cx - crop_w / 2)); top = int(round(cy - crop_h / 2))
+    left = max(0, min(img_w - crop_w, left)); top = max(0, min(img_h - crop_h, top))
+    return left, top, left + crop_w, top + crop_h
+
+
 def _face_crop_box(image_size: tuple[int, int], bbox: tuple[int, int, int, int], padding_percent: float, aspect_ratio: str) -> tuple[int, int, int, int]:
-    img_w, img_h = image_size; x1, y1, x2, y2 = bbox; face_w = max(1, x2 - x1); face_h = max(1, y2 - y1)
-    pad_x = face_w * max(0.0, padding_percent) / 100.0; pad_y = face_h * max(0.0, padding_percent) / 100.0
-    cx = (x1 + x2) / 2.0; cy = (y1 + y2) / 2.0; crop_w = face_w + 2 * pad_x; crop_h = face_h + 2 * pad_y; target = _parse_aspect(aspect_ratio)
-    if crop_w / max(1.0, crop_h) < target: crop_w = crop_h * target
-    else: crop_h = crop_w / target
-    crop_w = min(float(img_w), crop_w); crop_h = min(float(img_h), crop_h)
-    left = max(0.0, min(img_w - crop_w, cx - crop_w / 2)); top = max(0.0, min(img_h - crop_h, cy - crop_h / 2))
-    return round(left), round(top), round(left + crop_w), round(top + crop_h)
+    x1, y1, x2, y2 = bbox; face_w = max(1, x2 - x1); face_h = max(1, y2 - y1)
+    padding = max(0.0, padding_percent) / 100.0
+    req_w = face_w * (1 + 2 * padding); req_h = face_h * (1 + 2 * padding)
+    return _exact_aspect_box(image_size, ((x1 + x2) / 2.0, (y1 + y2) / 2.0), (req_w, req_h), aspect_ratio)
 
 
 def _face_detector():
+    errors: list[str] = []
+    try:
+        import cv2  # noqa: F401
+    except Exception as exc:
+        errors.append(f"cv2: {type(exc).__name__}: {exc}")
+    try:
+        import onnxruntime  # noqa: F401
+    except Exception as exc:
+        errors.append(f"onnxruntime: {type(exc).__name__}: {exc}")
     try:
         from insightface.app import FaceAnalysis
-        import cv2  # noqa: F401
-    except ImportError as exc:
-        raise RuntimeError("Automatic face derivatives require insightface, opencv-python-headless and onnxruntime. Install the Fizgig face-detection dependencies in the runtime.") from exc
+    except Exception as exc:
+        errors.append(f"insightface: {type(exc).__name__}: {exc}")
+        FaceAnalysis = None  # type: ignore
+    if errors or FaceAnalysis is None:
+        raise RuntimeError("Face detection runtime is not ready (import errors: " + " | ".join(errors) + ")")
     app = FaceAnalysis(name="buffalo_l", allowed_modules=["detection"], providers=["CPUExecutionProvider"]); app.prepare(ctx_id=-1)
     return app
 
@@ -162,12 +197,15 @@ class ImagePrepStore:
         return path, manifest
 
     def state(self, project_id: str, revision_id: str) -> dict[str, Any]:
-        _, manifest = self._load(project_id, revision_id); assets = manifest.get("assets", []); included = [a for a in assets if a.get("included", True)]; derivatives = [a for a in assets if a.get("asset_kind") == "derived"]
+        _, manifest = self._load(project_id, revision_id); assets = manifest.get("assets", []); included = [a for a in assets if a.get("included", True)]
+        source_assets = [a for a in assets if a.get("asset_kind") != "derived"]; derivatives = [a for a in assets if a.get("asset_kind") == "derived"]
+        face_derivatives = [a for a in derivatives if a.get("origin") == "face"]; manual_derivatives = [a for a in derivatives if a.get("origin") == "manual"]
+        overrides = [a for a in assets if a.get("transform_override")]
         files_dir = Path(manifest["files_path"]).resolve(); policy = manifest.get("training_resolution", DEFAULT_TRAINING_RESOLUTION); resolution_assets = []
         for asset in included:
             path = (files_dir / str(asset.get("filename", ""))).resolve()
             if path.parent == files_dir and path.is_file(): resolution_assets.append({"filename": asset.get("filename"), **_resolution_analysis(path, _effective_transform(manifest, asset), policy)})
-        return {"revision": revision_id, "model_family": manifest.get("model_family", "generic"), "incoming_count": len(assets), "included_count": len(included), "excluded_count": len(assets)-len(included), "derivative_count": len(derivatives), "global_transform": manifest.get("global_transform", DEFAULT_GLOBAL_TRANSFORM), "training_resolution": policy, "resolution_assets": resolution_assets, "assets": assets}
+        return {"revision": revision_id, "model_family": manifest.get("model_family", "generic"), "incoming_count": len(source_assets), "source_count": len(source_assets), "included_count": len(included), "excluded_count": len(assets)-len(included), "derivative_count": len(derivatives), "face_derivative_count": len(face_derivatives), "manual_derivative_count": len(manual_derivatives), "override_count": len(overrides), "global_transform": manifest.get("global_transform", DEFAULT_GLOBAL_TRANSFORM), "training_resolution": policy, "resolution_assets": resolution_assets, "assets": assets}
 
     def set_training_resolution(self, project_id: str, revision_id: str, policy: dict[str, Any]) -> dict[str, Any]:
         manifest_path, manifest = self._load(project_id, revision_id); merged = {**DEFAULT_TRAINING_RESOLUTION, **manifest.get("training_resolution", {}), **policy}
@@ -201,7 +239,7 @@ class ImagePrepStore:
             if not output.exists(): break
             index+=1
         with Image.open(source) as image: image.convert("RGB").crop(box).save(output,format="PNG")
-        asset={"id":uuid.uuid4().hex[:16],"filename":output.name,"image_sha256":_sha256(output),"caption":"","caption_sha256":hashlib.sha256(b"").hexdigest(),"origin":origin,"parent_asset_id":parent.get("id"),"parent_filename":source.name,"asset_kind":"derived","included":True,"transform_override":{"aspect_ratio":aspect_ratio},"operations":[operation]}
+        asset={"id":uuid.uuid4().hex[:16],"filename":output.name,"image_sha256":_sha256(output),"caption":"","caption_sha256":hashlib.sha256(b"").hexdigest(),"origin":origin,"parent_asset_id":parent.get("id"),"parent_filename":source.name,"asset_kind":"derived","included":True,"transform_override":{"aspect_ratio":aspect_ratio,"crop_mode":"fit"},"operations":[operation]}
         manifest.setdefault("assets",[]).append(asset); _write_json(manifest_path,manifest); return asset
 
     def create_manual_crop(self, project_id: str, revision_id: str, filename: str, crop: dict[str,float], aspect_ratio: str) -> dict[str,Any]:
@@ -209,8 +247,10 @@ class ImagePrepStore:
         if parent is None: raise FileNotFoundError(f"Image not found in revision: {filename}")
         files_dir=Path(manifest["files_path"]).resolve(); source=(files_dir/filename).resolve()
         if source.parent!=files_dir or not source.is_file(): raise FileNotFoundError(f"Working image not found: {filename}")
-        width,height=_image_dimensions(source); x=max(0.0,min(1.0,float(crop.get("x",0.0)))); y=max(0.0,min(1.0,float(crop.get("y",0.0)))); w=max(0.01,min(1.0-x,float(crop.get("width",1.0)))); h=max(0.01,min(1.0-y,float(crop.get("height",1.0)))); box=(round(x*width),round(y*height),round((x+w)*width),round((y+h)*height))
-        operation={"type":"manual_crop","aspect_ratio":aspect_ratio,"normalized_crop":{"x":x,"y":y,"width":w,"height":h},"pixel_box":list(box),"created_at":_now()}; asset=self._create_crop_asset(project_id,revision_id,manifest_path,manifest,parent,source,box,aspect_ratio,"manual",operation)
+        width,height=_image_dimensions(source); x=max(0.0,min(1.0,float(crop.get("x",0.0)))); y=max(0.0,min(1.0,float(crop.get("y",0.0)))); w=max(0.01,min(1.0-x,float(crop.get("width",1.0)))); h=max(0.01,min(1.0-y,float(crop.get("height",1.0))))
+        center=((x+w/2)*width,(y+h/2)*height); required=(w*width,h*height); box=_exact_aspect_box((width,height),center,required,aspect_ratio)
+        nx,ny,nx2,ny2=box; normalized={"x":nx/width,"y":ny/height,"width":(nx2-nx)/width,"height":(ny2-ny)/height}
+        operation={"type":"manual_crop","aspect_ratio":aspect_ratio,"normalized_crop":normalized,"pixel_box":list(box),"created_at":_now()}; asset=self._create_crop_asset(project_id,revision_id,manifest_path,manifest,parent,source,box,aspect_ratio,"manual",operation)
         _append_jsonl(project_store.project_dir(project_id)/"events.jsonl",{"time":_now(),"type":"image_derived","revision":revision_id,"method":"manual_crop","parent":filename,"filename":asset["filename"],"aspect_ratio":aspect_ratio,"crop":operation}); return {"asset":asset,"state":self.state(project_id,revision_id)}
 
     def propose_face_crops(self, project_id: str, revision_id: str, filenames: list[str], aspect_ratio: str="1:1", padding_percent: float=60.0) -> dict[str,Any]:
@@ -240,7 +280,9 @@ class ImagePrepStore:
             if parent is None: continue
             source=(files_dir/filename).resolve(); box=tuple(int(v) for v in proposal.get("crop_box",[]))
             if source.parent!=files_dir or not source.is_file() or len(box)!=4: continue
-            width,height=_image_dimensions(source); x1=max(0,min(width-1,box[0])); y1=max(0,min(height-1,box[1])); x2=max(x1+1,min(width,box[2])); y2=max(y1+1,min(height,box[3])); aspect=str(proposal.get("aspect_ratio","1:1"))
+            width,height=_image_dimensions(source); aspect=str(proposal.get("aspect_ratio","1:1")); x1,y1,x2,y2=box
+            # Re-normalize proposals through the exact-ratio fitter before materializing.
+            exact=_exact_aspect_box((width,height),((x1+x2)/2,(y1+y2)/2),(x2-x1,y2-y1),aspect); x1,y1,x2,y2=exact
             operation={"type":"face_crop","detector":"InsightFace buffalo_l","face_index":proposal.get("face_index"),"detection_score":proposal.get("score"),"face_bbox":proposal.get("face_bbox"),"padding_percent":proposal.get("padding_percent"),"aspect_ratio":aspect,"pixel_box":[x1,y1,x2,y2],"created_at":_now()}
             asset=self._create_crop_asset(project_id,revision_id,manifest_path,manifest,parent,source,(x1,y1,x2,y2),aspect,"face",operation); created.append(asset)
         _append_jsonl(project_store.project_dir(project_id)/"events.jsonl",{"time":_now(),"type":"face_crop_derivatives_created","revision":revision_id,"count":len(created),"filenames":[a["filename"] for a in created]}); return {"assets":created,"state":self.state(project_id,revision_id)}
