@@ -170,7 +170,8 @@ def materialize_project_captions(project_id: str, revision_id: str) -> dict[str,
 def create_run(project_id: str, request: RunCreate) -> dict[str, Any]:
     try:
         project_caption_store.materialize_revision(project_id, request.dataset_revision)
-        return project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=request.config)
+        run = project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=request.config)
+        return image_prep_store.materialize_run_dataset(project_id, request.dataset_revision, run)
     except FileNotFoundError as exc:
         raise _not_found(exc) from exc
     except ValueError as exc:
