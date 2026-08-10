@@ -160,8 +160,9 @@ class PreparedDerivativeService:
         image.save(out, format="PNG")
         return out.getvalue()
 
-    def preview_url(self, project_id: str, revision_id: str, filename: str) -> str:
-        return f"/api/projects/{quote(project_id)}/revisions/{quote(revision_id)}/prep/assets/{quote(filename)}/prepared-preview"
+    def preview_url(self, project_id: str, revision_id: str, filename: str, version: str | None = None) -> str:
+        url = f"/api/projects/{quote(project_id)}/revisions/{quote(revision_id)}/prep/assets/{quote(filename)}/prepared-preview"
+        return f"{url}?v={quote(version)}" if version else url
 
     def create_manual_crop(self, project_id: str, revision_id: str, filename: str, crop: dict[str, float], aspect_ratio: str) -> dict[str, Any]:
         manifest_path, manifest = image_prep_store._load(project_id, revision_id)
@@ -208,13 +209,14 @@ class PreparedDerivativeService:
             arr = cv2.cvtColor(np.array(rgb), cv2.COLOR_RGB2BGR)
             faces = detector.get(arr)
             size = rgb.size
-            preview_url = self.preview_url(project_id, revision_id, filename)
+            basis_hash = hashlib.sha1(repr(basis).encode()).hexdigest()[:12]
+            preview_url = self.preview_url(project_id, revision_id, filename, basis_hash)
             for index, face in enumerate(sorted(faces, key=lambda f: float(getattr(f, "det_score", 0.0)), reverse=True)):
                 raw = tuple(int(v) for v in face.bbox)
                 box = _face_crop_box(size, raw, padding_percent, aspect_ratio)
                 x1, y1, x2, y2 = box
                 proposals.append({
-                    "id": f"{asset.get('id', filename)}:{index}:{aspect_ratio}:{padding_percent}:{hashlib.sha1(str(basis).encode()).hexdigest()[:8]}",
+                    "id": f"{asset.get('id', filename)}:{index}:{aspect_ratio}:{padding_percent}:{basis_hash[:8]}",
                     "filename": filename,
                     "asset_id": asset.get("id"),
                     "face_index": index,
