@@ -14,6 +14,80 @@ export type DatasetInfo = {
   images: DatasetImage[];
 };
 
+export type ProjectRevisionSummary = {
+  id: string;
+  name: string;
+  model_family: string;
+  basis: { type: string; id: string };
+  created_at: string;
+  image_count: number;
+  path: string;
+  scratch: true;
+};
+
+export type ProjectRunSummary = {
+  id: string;
+  name: string;
+  created_at: string;
+  status: string;
+  model_family: string;
+  dataset_revision: string;
+  path: string;
+};
+
+export type ProjectInfo = {
+  id: string;
+  name: string;
+  description: string;
+  trigger_word: string;
+  created_at: string;
+  updated_at: string;
+  external_source: {
+    path: string;
+    owned_by_project: false;
+    mutable_by_project: false;
+  };
+  imports: Array<{ id: string; created_at: string; image_count: number; path: string }>;
+  current_import: string;
+  current_dataset_revision: string | null;
+  current_run: string | null;
+  dataset_revisions: ProjectRevisionSummary[];
+  runs: ProjectRunSummary[];
+};
+
+export type ProjectRevision = {
+  id: string;
+  name: string;
+  model_family: string;
+  created_at: string;
+  basis: { type: string; id: string };
+  scratch: true;
+  files_path: string;
+  assets: Array<Record<string, unknown>>;
+};
+
+export type ProjectCreateResult = {
+  project: ProjectInfo;
+  revision: ProjectRevision;
+};
+
+export type RunInfo = {
+  id: string;
+  name: string;
+  created_at: string;
+  status: string;
+  project_id: string;
+  model_family: string;
+  trigger_word: string;
+  dataset_revision: string;
+  dataset_path: string;
+  dataset_is_scratch: true;
+  output_dir: string;
+  config: Record<string, unknown>;
+  software: Record<string, unknown>;
+  artifacts: Array<Record<string, unknown>>;
+};
+
 export type QwenTask = {
   label: string;
   instruction: string;
@@ -84,6 +158,58 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   }
 
   return response.json() as Promise<T>;
+}
+
+export function listProjects() {
+  return api<ProjectInfo[]>("/api/projects");
+}
+
+export function createProject(args: {
+  name: string;
+  source_path: string;
+  trigger_word?: string;
+  description?: string;
+}) {
+  return api<ProjectCreateResult>("/api/projects", {
+    method: "POST",
+    body: JSON.stringify(args),
+  });
+}
+
+export function getProject(projectId: string) {
+  return api<ProjectInfo>(`/api/projects/${encodeURIComponent(projectId)}`);
+}
+
+export function createProjectRevision(projectId: string, args: {
+  name: string;
+  model_family: string;
+  parent_revision?: string;
+  import_id?: string;
+}) {
+  return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions`, {
+    method: "POST",
+    body: JSON.stringify(args),
+  });
+}
+
+export function prepareRun(projectId: string, args: {
+  name: string;
+  model_family: string;
+  dataset_revision: string;
+  trigger_word?: string;
+  config?: Record<string, unknown>;
+}) {
+  return api<RunInfo>(`/api/projects/${encodeURIComponent(projectId)}/runs`, {
+    method: "POST",
+    body: JSON.stringify(args),
+  });
+}
+
+export function appendRunEvent(projectId: string, runId: string, type: string, payload: Record<string, unknown> = {}) {
+  return api<Record<string, unknown>>(
+    `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/events`,
+    { method: "POST", body: JSON.stringify({ type, payload }) },
+  );
 }
 
 export function inspectDataset(path: string) {
