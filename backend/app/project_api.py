@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
+from .captioning import add_trigger, caption_service
 from .image_prep import image_prep_store
 from .prepared_derivatives import prepared_derivative_service
 from .project_captions import project_caption_store
@@ -19,6 +21,7 @@ class RunCreate(BaseModel): name: str; model_family: str; dataset_revision: str;
 class RunEventCreate(BaseModel): type: str; payload: dict[str, Any] = Field(default_factory=dict)
 class ArtifactCreate(BaseModel): type: str; path: str; metadata: dict[str, Any] = Field(default_factory=dict)
 class ProjectCaptionUpdate(BaseModel): caption: str; reason: str = "manual_edit"; metadata: dict[str, Any] = Field(default_factory=dict); materialize: bool = False; run_id: str | None = None
+class ProjectCaptionGenerate(BaseModel): provider: str = "qwen"; model: str | None = None; model_path: str | None = None; processor: str | None = None; revision: str | None = None; task: str | None = None; instruction: str | None = None; max_tokens: int | None = Field(default=None, ge=16, le=1024); trigger_word: str = ""; add_trigger_word: bool = True; save: bool = False
 class CaptionValidationPolicyUpdate(BaseModel): protected_phrases: list[str] | None = None; spellcheck_enabled: bool | None = None; accepted_words: list[str] | None = None
 class AssetPolicyUpdate(BaseModel): training_policy: str | None = None; auto_recaption_policy: str | None = None
 class InclusionUpdate(BaseModel): filenames: list[str] = Field(default_factory=list); included: bool
@@ -185,6 +188,21 @@ def queue_image_prep_operation(project_id: str, revision_id: str, request: PrepO
 def get_project_caption(project_id: str, revision_id: str, filename: str):
     try: return project_caption_store.get_caption(project_id, revision_id, filename)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
+@router.post("/{project_id}/revisions/{revision_id}/captions/{filename}/generate")
+def generate_project_caption(project_id: str, revision_id: str, filename: str, request: ProjectCaptionGenerate):
+    try:
+        prepared_png = prepared_derivative_service.preview_png(project_id, revision_id, filename)
+        with tempfile.NamedTemporaryFile(suffix=".png") as temp:
+            temp.write(prepared_png)
+            temp.flush()
+            caption = caption_service.generate(provider=request.provider, image_path=Path(temp.name), model=request.model, model_path=request.model_path, processor=request.processor, revision=request.revision, task=request.task, instruction=request.instruction, max_tokens=request.max_tokens)
+        if request.add_trigger_word:
+            caption = add_trigger(caption, request.trigger_word)
+        return {"filename": filename, "caption": caption, "saved": False, "provider": request.provider, "prepared_asset": True}
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except Exception as exc: raise HTTPException(status_code=500, detail=f"Caption generation failed: {type(exc).__name__}: {exc}") from exc
 @router.put("/{project_id}/revisions/{revision_id}/captions/{filename}")
 def update_project_caption(project_id: str, revision_id: str, filename: str, request: ProjectCaptionUpdate):
     try: return project_caption_store.set_caption(project_id, revision_id, filename, request.caption, reason=request.reason, metadata=request.metadata, materialize=request.materialize, run_id=request.run_id)
