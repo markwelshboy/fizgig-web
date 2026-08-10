@@ -60,6 +60,8 @@ export type ProjectAsset = {
   origin?: string;
   parent_asset_id?: string | null;
   operations?: Array<Record<string, unknown>>;
+  included?: boolean;
+  asset_kind?: "source" | "derived";
 };
 
 export type ProjectRevision = {
@@ -70,6 +72,16 @@ export type ProjectRevision = {
   basis: { type: string; id: string };
   scratch: true;
   files_path: string;
+  assets: ProjectAsset[];
+};
+
+export type ImagePrepState = {
+  revision: string;
+  model_family: string;
+  incoming_count: number;
+  included_count: number;
+  excluded_count: number;
+  derivative_count: number;
   assets: ProjectAsset[];
 };
 
@@ -138,17 +150,20 @@ export function getProjectRevision(projectId: string, revisionId: string) {
 export function createProjectRevision(projectId: string, args: { name: string; model_family: string; parent_revision?: string; import_id?: string }) {
   return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions`, { method: "POST", body: JSON.stringify(args) });
 }
-export function updateProjectCaption(projectId: string, revisionId: string, filename: string, args: {
-  caption: string;
-  reason?: string;
-  metadata?: Record<string, unknown>;
-  materialize?: boolean;
-  run_id?: string;
-}) {
-  return api<{ filename: string; caption: string; changed: boolean; materialized: boolean }>(
-    `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}`,
-    { method: "PUT", body: JSON.stringify(args) },
-  );
+export function getImagePrepState(projectId: string, revisionId: string) {
+  return api<ImagePrepState>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/prep`);
+}
+export function setImageInclusion(projectId: string, revisionId: string, filenames: string[], included: boolean) {
+  return api<ImagePrepState>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/prep/inclusion`, { method: "PUT", body: JSON.stringify({ filenames, included }) });
+}
+export function setAllImageInclusion(projectId: string, revisionId: string, included: boolean) {
+  return api<ImagePrepState>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/prep/inclusion-all`, { method: "PUT", body: JSON.stringify({ filenames: [], included }) });
+}
+export function queueImagePrepOperation(projectId: string, revisionId: string, filenames: string[], operation: Record<string, unknown>) {
+  return api<ImagePrepState>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/prep/operations`, { method: "POST", body: JSON.stringify({ filenames, operation }) });
+}
+export function updateProjectCaption(projectId: string, revisionId: string, filename: string, args: { caption: string; reason?: string; metadata?: Record<string, unknown>; materialize?: boolean; run_id?: string }) {
+  return api<{ filename: string; caption: string; changed: boolean; materialized: boolean }>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}`, { method: "PUT", body: JSON.stringify(args) });
 }
 export function materializeProjectCaptions(projectId: string, revisionId: string) {
   return api<{ revision: string; written: number }>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/materialize-captions`, { method: "POST" });
