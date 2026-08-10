@@ -9,9 +9,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from .captioning import add_trigger, caption_service, download_qwen_snapshot
+from .project_api import router as project_router
 from .settings import save_settings, settings_dict
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
+app.include_router(project_router)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".jxl"}
 _DATASETS: dict[str, Path] = {}
