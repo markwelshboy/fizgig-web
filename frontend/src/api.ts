@@ -42,17 +42,24 @@ export type ProjectInfo = {
   trigger_word: string;
   created_at: string;
   updated_at: string;
-  external_source: {
-    path: string;
-    owned_by_project: false;
-    mutable_by_project: false;
-  };
+  external_source: { path: string; owned_by_project: false; mutable_by_project: false };
   imports: Array<{ id: string; created_at: string; image_count: number; path: string }>;
   current_import: string;
   current_dataset_revision: string | null;
   current_run: string | null;
   dataset_revisions: ProjectRevisionSummary[];
   runs: ProjectRunSummary[];
+};
+
+export type ProjectAsset = {
+  id?: string;
+  filename: string;
+  caption: string;
+  caption_sha256?: string;
+  caption_updated_at?: string;
+  origin?: string;
+  parent_asset_id?: string | null;
+  operations?: Array<Record<string, unknown>>;
 };
 
 export type ProjectRevision = {
@@ -63,13 +70,10 @@ export type ProjectRevision = {
   basis: { type: string; id: string };
   scratch: true;
   files_path: string;
-  assets: Array<Record<string, unknown>>;
+  assets: ProjectAsset[];
 };
 
-export type ProjectCreateResult = {
-  project: ProjectInfo;
-  revision: ProjectRevision;
-};
+export type ProjectCreateResult = { project: ProjectInfo; revision: ProjectRevision };
 
 export type RunInfo = {
   id: string;
@@ -88,34 +92,12 @@ export type RunInfo = {
   artifacts: Array<Record<string, unknown>>;
 };
 
-export type QwenTask = {
-  label: string;
-  instruction: string;
-  max_tokens: number;
-};
+export type QwenTask = { label: string; instruction: string; max_tokens: number };
 
 export type CaptioningOptions = {
   providers: Array<
-    | {
-        id: "qwen";
-        name: string;
-        tasks: Record<string, QwenTask>;
-        default_task: string;
-        default_model: string;
-        default_processor: string;
-        default_revision: string;
-        supports_instruction_override: true;
-        supports_arbitrary_model: true;
-      }
-    | {
-        id: "florence";
-        name: string;
-        models: string[];
-        default_model: string;
-        tasks: string[];
-        default_task: string;
-        supports_instruction_override: false;
-      }
+    | { id: "qwen"; name: string; tasks: Record<string, QwenTask>; default_task: string; default_model: string; default_processor: string; default_revision: string; supports_instruction_override: true; supports_arbitrary_model: true }
+    | { id: "florence"; name: string; models: string[]; default_model: string; tasks: string[]; default_task: string; supports_instruction_override: false }
   >;
 };
 
@@ -133,139 +115,61 @@ export type CaptionGenerateRequest = {
   save?: boolean;
 };
 
-export type Preferences = {
-  qwen_caption_model: string;
-  qwen_caption_processor: string;
-  qwen_caption_revision: string;
-  caption_model_dir: string;
-};
+export type Preferences = { qwen_caption_model: string; qwen_caption_processor: string; qwen_caption_revision: string; caption_model_dir: string };
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
-    ...init,
-  });
-
+  const response = await fetch(url, { headers: { "Content-Type": "application/json", ...(init?.headers || {}) }, ...init });
   if (!response.ok) {
     let detail = `${response.status} ${response.statusText}`;
-    try {
-      const body = await response.json();
-      if (body?.detail) detail = body.detail;
-    } catch {
-      // Keep the HTTP status fallback.
-    }
+    try { const body = await response.json(); if (body?.detail) detail = body.detail; } catch { /* status fallback */ }
     throw new Error(detail);
   }
-
   return response.json() as Promise<T>;
 }
 
-export function listProjects() {
-  return api<ProjectInfo[]>("/api/projects");
+export function listProjects() { return api<ProjectInfo[]>("/api/projects"); }
+export function createProject(args: { name: string; source_path: string; trigger_word?: string; description?: string }) {
+  return api<ProjectCreateResult>("/api/projects", { method: "POST", body: JSON.stringify(args) });
 }
-
-export function createProject(args: {
-  name: string;
-  source_path: string;
-  trigger_word?: string;
-  description?: string;
+export function getProject(projectId: string) { return api<ProjectInfo>(`/api/projects/${encodeURIComponent(projectId)}`); }
+export function getProjectRevision(projectId: string, revisionId: string) {
+  return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}`);
+}
+export function createProjectRevision(projectId: string, args: { name: string; model_family: string; parent_revision?: string; import_id?: string }) {
+  return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions`, { method: "POST", body: JSON.stringify(args) });
+}
+export function updateProjectCaption(projectId: string, revisionId: string, filename: string, args: {
+  caption: string;
+  reason?: string;
+  metadata?: Record<string, unknown>;
+  materialize?: boolean;
+  run_id?: string;
 }) {
-  return api<ProjectCreateResult>("/api/projects", {
-    method: "POST",
-    body: JSON.stringify(args),
-  });
+  return api<{ filename: string; caption: string; changed: boolean; materialized: boolean }>(
+    `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}`,
+    { method: "PUT", body: JSON.stringify(args) },
+  );
 }
-
-export function getProject(projectId: string) {
-  return api<ProjectInfo>(`/api/projects/${encodeURIComponent(projectId)}`);
+export function materializeProjectCaptions(projectId: string, revisionId: string) {
+  return api<{ revision: string; written: number }>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/materialize-captions`, { method: "POST" });
 }
-
-export function createProjectRevision(projectId: string, args: {
-  name: string;
-  model_family: string;
-  parent_revision?: string;
-  import_id?: string;
-}) {
-  return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions`, {
-    method: "POST",
-    body: JSON.stringify(args),
-  });
+export function prepareRun(projectId: string, args: { name: string; model_family: string; dataset_revision: string; trigger_word?: string; config?: Record<string, unknown> }) {
+  return api<RunInfo>(`/api/projects/${encodeURIComponent(projectId)}/runs`, { method: "POST", body: JSON.stringify(args) });
 }
-
-export function prepareRun(projectId: string, args: {
-  name: string;
-  model_family: string;
-  dataset_revision: string;
-  trigger_word?: string;
-  config?: Record<string, unknown>;
-}) {
-  return api<RunInfo>(`/api/projects/${encodeURIComponent(projectId)}/runs`, {
-    method: "POST",
-    body: JSON.stringify(args),
-  });
-}
-
 export function appendRunEvent(projectId: string, runId: string, type: string, payload: Record<string, unknown> = {}) {
-  return api<Record<string, unknown>>(
-    `/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/events`,
-    { method: "POST", body: JSON.stringify({ type, payload }) },
-  );
+  return api<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/runs/${encodeURIComponent(runId)}/events`, { method: "POST", body: JSON.stringify({ type, payload }) });
 }
-
-export function inspectDataset(path: string) {
-  return api<DatasetInfo>("/api/datasets/inspect", {
-    method: "POST",
-    body: JSON.stringify({ path }),
-  });
-}
-
+export function inspectDataset(path: string) { return api<DatasetInfo>("/api/datasets/inspect", { method: "POST", body: JSON.stringify({ path }) }); }
 export function saveCaption(datasetId: string, filename: string, caption: string) {
-  return api<{ filename: string; caption: string }>(
-    `/api/datasets/${datasetId}/captions/${encodeURIComponent(filename)}`,
-    {
-      method: "PUT",
-      body: JSON.stringify({ caption }),
-    },
-  );
+  return api<{ filename: string; caption: string }>(`/api/datasets/${datasetId}/captions/${encodeURIComponent(filename)}`, { method: "PUT", body: JSON.stringify({ caption }) });
 }
-
-export function getCaptioningOptions() {
-  return api<CaptioningOptions>("/api/captioning/options");
-}
-
+export function getCaptioningOptions() { return api<CaptioningOptions>("/api/captioning/options"); }
 export function generateCaption(datasetId: string, filename: string, request: CaptionGenerateRequest) {
-  return api<{ filename: string; caption: string; saved: boolean; provider: string }>(
-    `/api/datasets/${datasetId}/captions/${encodeURIComponent(filename)}/generate`,
-    {
-      method: "POST",
-      body: JSON.stringify(request),
-    },
-  );
+  return api<{ filename: string; caption: string; saved: boolean; provider: string }>(`/api/datasets/${datasetId}/captions/${encodeURIComponent(filename)}/generate`, { method: "POST", body: JSON.stringify(request) });
 }
-
-export function unloadCaptionModels() {
-  return api<{ unloaded: string[] }>("/api/captioning/unload", { method: "POST" });
-}
-
-export function getPreferences() {
-  return api<Preferences>("/api/preferences");
-}
-
-export function savePreferences(preferences: Preferences) {
-  return api<Preferences>("/api/preferences", {
-    method: "PUT",
-    body: JSON.stringify(preferences),
-  });
-}
-
-export function downloadQwenModel(args: {
-  repo_id: string;
-  revision?: string;
-  model_dir?: string;
-  use_as_qwen_caption_model?: boolean;
-}) {
-  return api<{ repo_id: string; path: string; selected: boolean }>("/api/models/qwen/download", {
-    method: "POST",
-    body: JSON.stringify(args),
-  });
+export function unloadCaptionModels() { return api<{ unloaded: string[] }>("/api/captioning/unload", { method: "POST" }); }
+export function getPreferences() { return api<Preferences>("/api/preferences"); }
+export function savePreferences(preferences: Preferences) { return api<Preferences>("/api/preferences", { method: "PUT", body: JSON.stringify(preferences) }); }
+export function downloadQwenModel(args: { repo_id: string; revision?: string; model_dir?: string; use_as_qwen_caption_model?: boolean }) {
+  return api<{ repo_id: string; path: string; selected: boolean }>("/api/models/qwen/download", { method: "POST", body: JSON.stringify(args) });
 }
