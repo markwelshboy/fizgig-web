@@ -1,0 +1,35 @@
+.processed-card {
+  height: 100%;
+}
+
+.processed-image {
+  aspect-ratio: 1 / 1 !important;
+  display: grid;
+  place-items: center;
+}
+
+.processed-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #06101c;
+}
+
+.inline-editor-preview {
+  aspect-ratio: 1 / 1;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+
+.inline-editor-preview img {
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.prep-image-meta .status-good,
+.prep-image-meta .status-suspect {
+  font-weight: 600;
+}
