@@ -11,6 +11,9 @@ The project is intentionally not a remote-desktop wrapper. Fizgig remains the un
 - immutable import snapshots for reproducibility
 - model-specific scratch working datasets for Krea 2 and Klein
 - Image Prep intake selection with per-image include/exclude state
+- manual and InsightFace-derived crops with provenance
+- global composition/tonal recipes plus per-image exceptions
+- one maximum training-resolution policy with aspect buckets and downscale-only support
 - run-local trainer datasets containing only included assets
 - project-owned canonical captions; `.txt` files are trainer compatibility shims
 - Qwen3-VL and Florence captioning
@@ -29,22 +32,77 @@ immutable import
     ↓
 incoming batch
     ↓ include / exclude
-face/detail derivatives
+automatic + manual derivatives
     ↓
 effective working set
     ↓
-model-aware crop / resize / adjustments
+composition / image adjustments
+    ↓
+maximum training-resolution policy
     ↓
 Captions
     ↓
 run-local trainer dataset
 ```
 
-The current workbench implements real inclusion/exclusion state and the working-set flow. Face detection/derived-image materialization and model-aware transformation execution are the next backend pieces.
+Project assets retain useful source resolution. Crop/tonal transforms are materialized into the run-local dataset, then Fizgig performs the configured aspect-bucket/downscale stage. The default policy is no upscaling.
 
 See `docs/PROJECT_MODEL.md` for the detailed provenance and ownership rules.
 
-## Development
+## Local CPU Docker harness
+
+For UI review and Image Prep work on a machine with no GPU:
+
+```bash
+git switch agent/initial-web-poc
+mkdir -p .local/workspace/datasets
+
+docker compose -f docker-compose.local.yml up --build
+```
+
+Open:
+
+```text
+http://localhost:5173
+```
+
+FastAPI is also exposed directly at `http://localhost:8000` for debugging.
+
+The compose harness deliberately requests no NVIDIA runtime. Its persistent host workspace is:
+
+```text
+./.local/workspace/
+```
+
+which is mounted into both application expectations as `/workspace`. Put a dataset you want to test under, for example:
+
+```text
+.local/workspace/datasets/test-person/
+```
+
+and enter this path in Fizgig Web:
+
+```text
+/workspace/datasets/test-person
+```
+
+Projects created by the local harness are persisted under:
+
+```text
+.local/workspace/projects/
+```
+
+CPU-safe project and image operations work normally. InsightFace uses ONNX Runtime CPU. Qwen/Florence generation and real training are intentionally not part of the no-GPU review harness; those actions require the target Fizgig/CUDA runtime.
+
+Stop the harness with:
+
+```bash
+docker compose -f docker-compose.local.yml down
+```
+
+The `.local/` workspace is gitignored, so project/test data is not committed.
+
+## Native development
 
 Backend:
 
@@ -64,4 +122,4 @@ npm install
 npm run dev -- --host 0.0.0.0
 ```
 
-Vite proxies `/api` to the FastAPI backend.
+Vite proxies `/api` to the FastAPI backend. Set `VITE_API_PROXY_TARGET` to override the default `http://127.0.0.1:8000`, as the Docker harness does.
