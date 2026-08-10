@@ -7,212 +7,138 @@ Fizgig Web treats a LoRA project as a reproducible experiment history, not as a 
 1. **The user's external dataset is the canonical source.** Fizgig Web never modifies it.
 2. **A project creates an immutable import snapshot.** This is an archival starting point for reproducibility, not a replacement canonical source.
 3. **All model-specific datasets are scratch working sets.** Image Prep, caption generation, training-time recaptioning, exclusions, brightness fixes, face crops, resizing, etc. happen only in project-owned working copies.
-4. **Caption state is canonical in project JSON, not in `.txt` sidecars.** Sidecars are generated compatibility files for Fizgig/trainer subprocesses.
-5. **A run snapshots its exact effective dataset before training.** That includes image hashes and the exact starting caption text for every image.
-6. **Mutations are events, not lost state.** Caption changes, image derivations, exclusions, per-image LR changes, checkpoints, trainer states, samples, and manual interventions are recorded.
-7. **Artifacts are identified by hash.** A safetensor or state export is meaningful only together with the dataset/config/history that produced it.
+4. **Image Prep constructs the effective dataset.** Every incoming asset can be included or excluded; derivatives become new assets with lineage; transformations remain non-destructive and attributable.
+5. **Captions live in project JSON.** `.txt` sidecars are disposable trainer compatibility shims generated from project state.
+6. **A run materializes only included assets.** The trainer receives a run-local dataset folder containing exactly the effective working set and current project captions.
+7. **A run snapshots its exact effective dataset before training.** That includes image hashes and the exact starting caption text for every included image.
+8. **Mutations are events, not lost state.** Caption changes, image derivations, exclusions, per-image LR changes, checkpoints, trainer states, samples, and manual interventions are recorded.
+9. **Artifacts are identified by hash.** A safetensor or state export is meaningful only together with the dataset/config/history that produced it.
 
-## Layout
+## Dataset construction flow
 
 ```text
-projects/<project-id>/
-├── project.json
-├── events.jsonl
-│
-├── imports/
-│   └── import-0001/
-│       ├── manifest.json
-│       └── files/
-│           ├── image_0001.png
-│           ├── image_0001.txt        # immutable imported source snapshot only
-│           └── ...
-│
-├── datasets/
-│   ├── ds-0001/
-│   │   ├── manifest.json             # canonical working captions + asset state
-│   │   ├── prep.json
-│   │   └── files/                    # scratch images + generated trainer sidecars
-│   └── ds-0002/
-│       └── ...
-│
-└── runs/
-    └── run-0001/
-        ├── run.json
-        ├── dataset_snapshot.json
-        ├── events.jsonl
-        ├── loss_log/
-        ├── samples/
-        ├── checkpoints/
-        ├── state/
-        └── artifacts/
+External canonical source
+        │
+        ▼
+Immutable import snapshot
+        │
+        ▼
+Incoming batch
+        │
+        ├── include / exclude each source image
+        │
+        ▼
+Derivative generation
+        │
+        ├── face crops
+        ├── upper-body/detail crops
+        └── future derived variants
+        │
+        ▼
+Effective working set
+        │
+        ▼
+Model-aware transform pipeline
+        │
+        ├── aspect/crop
+        ├── resize to model-native target/bucket
+        └── optional exposure/contrast/etc.
+        │
+        ▼
+Captions (project JSON)
+        │
+        ▼
+Run-local trainer dataset
 ```
 
-## External source versus import snapshot
+An excluded source image is not deleted and is not considered bad globally. It is simply not a member of this particular working dataset. It remains in the immutable import snapshot and can be included in another revision or later experiment.
 
-`project.json` records the external source path explicitly:
+A derivative is a first-class project asset. It records its parent asset plus the operation that created it, for example:
 
 ```json
 {
-  "external_source": {
-    "path": "/workspace/reference-datasets/person-a",
-    "owned_by_project": false,
-    "mutable_by_project": false
-  }
+  "filename": "referenceimage_00012_face01.png",
+  "asset_kind": "derived",
+  "parent_asset_id": "abc123",
+  "included": true,
+  "operations": [
+    {
+      "type": "face_crop",
+      "detector": "...",
+      "box": [410, 118, 980, 688]
+    }
+  ],
+  "caption": ""
 }
 ```
 
-When the project is created, Fizgig Web copies the current files into `imports/import-0001/files/` and hashes every image/caption. This snapshot answers "what did the source look like when this project began?" even if the external canonical source evolves later.
+New derivatives normally enter Captions as missing-caption assets. We may later offer deliberate caption inheritance as an explicit operation, but it must never happen invisibly.
 
-The import snapshot is never edited.
+## Run-local trainer shim
 
-## Dataset revisions are scratchpads
+The project revision is the authoritative dataset definition. At run preparation Fizgig Web creates:
 
-A dataset revision is a materialized working set for a particular training direction or model family. It can contain:
-
-- model-specific crop/resize geometry
-- face crops that did not exist in the external source
-- exposure/brightness/contrast corrections
-- generated or manually edited captions
-- removed or excluded images
-- future Image Prep transformations
-
-A revision has lineage via its `basis` field:
-
-```json
-{
-  "id": "ds-0003",
-  "model_family": "krea2",
-  "basis": {"type": "import_snapshot", "id": "import-0001"},
-  "scratch": true
-}
+```text
+runs/run-0001/dataset/
+├── included_image_01.png
+├── included_image_01.txt
+├── included_image_02.png
+├── included_image_02.txt
+└── ...
 ```
 
-or from another scratch revision:
+Only included assets are copied. Caption sidecars are generated from the canonical caption values in project JSON. The trainer never needs to understand projects, revisions, provenance, or caption history; this folder is the shim between Fizgig Web and the upstream trainer.
 
-```json
-{
-  "basis": {"type": "dataset_revision", "id": "ds-0002"}
-}
-```
+The run's `dataset_snapshot.json` describes exactly this materialized set, including hashes, captions, lineage, and preparation operations. Excluded images therefore cannot accidentally leak into training merely because their files still exist in the project revision.
 
-No scratch dataset is ever promoted to canonical source automatically.
+## Caption ownership
 
-## Captions: project state first, sidecars second
-
-For every asset in a scratch revision, `manifest.json` owns the current caption:
+The revision manifest is authoritative:
 
 ```json
 {
   "filename": "referenceimage_00042.png",
-  "caption": "the current project caption",
-  "caption_sha256": "...",
-  "caption_updated_at": "..."
+  "included": true,
+  "caption": "the current canonical caption",
+  "caption_sha256": "..."
 }
 ```
 
-Manual edits and AI recaptions update this JSON state first and append a provenance event containing the old/new text and the model/prompt that caused the change.
+When a caption changes, Fizgig Web updates JSON and appends an event containing the before/after text and provenance. A `.txt` file is written only when a trainer-facing materialization or active-run intervention requires one.
 
-The `.txt` file beside the image is **not** authoritative. It exists only because upstream Fizgig and trainer subprocesses expect same-basename sidecars.
-
-Fizgig Web materializes sidecars from project JSON:
-
-- immediately before preparing/starting a run;
-- when a live training-time recaption/manual edit must be pushed into the trainer's scratch dataset;
-- on explicit compatibility/export operations.
-
-This makes the filesystem dataset a shim to the trainer rather than the source of project knowledge. If a sidecar and the manifest ever disagree, the manifest wins and the sidecar is regenerated.
-
-## Run snapshot
-
-Immediately before training begins, captions are materialized from the revision manifest and the chosen scratch dataset is frozen logically into `dataset_snapshot.json`.
-
-For every image it records at minimum:
-
-```json
-{
-  "asset_id": "...",
-  "filename": "referenceimage_00042.png",
-  "image_sha256": "...",
-  "caption": "the exact starting caption",
-  "caption_sha256": "...",
-  "origin": "external_source_import",
-  "parent_asset_id": null,
-  "operations": []
-}
-```
-
-This is the immutable start point for that run. During training, project/run events preserve every subsequent caption or image intervention even though the trainer-facing scratch files may be regenerated or replaced.
+If JSON and a scratch sidecar ever disagree, JSON wins.
 
 ## Event history
 
-Project and run event logs are append-only JSONL.
+Project and run event logs are append-only JSONL. Expected events include:
 
-Expected run events include:
-
+- `image_inclusion_changed`
+- `image_derived`
+- `image_prep_operation_queued` / transformation-completed events
+- `caption_changed`
+- `trainer_dataset_materialized`
 - `run_prepared`
 - `training_started`
 - `training_stopped`
 - `training_resumed`
-- `trainer_captions_materialized`
 - `image_status_changed`
 - `per_image_lr_changed`
-- `caption_changed`
-- `caption_regenerated`
-- `image_derived`
 - `image_excluded`
 - `image_readmitted`
-- `image_removed`
 - `checkpoint_saved`
 - `trainer_state_saved`
 - `sample_generated`
 - `artifact_registered`
 - `plateau_detected`
 
-Caption events should preserve the actual prompt/model used, not just a preset name:
+Caption events preserve the exact provider/model/prompt used. Image events preserve the exact operation geometry/parameters used. This lets the UI later answer whether a recaption, crop, brightness adjustment, or other intervention actually improved the subsequent training trajectory.
 
-```json
-{
-  "type": "caption_changed",
-  "epoch": 8,
-  "image": "referenceimage_00042.png",
-  "reason": "auto_recaption_stuck",
-  "provider": "qwen",
-  "model": "Qwen/Qwen3-VL-8B-Instruct",
-  "model_revision": "...",
-  "task": "detailed",
-  "instruction": "the exact resolved prompt text",
-  "before": "...",
-  "after": "..."
-}
-```
+## Project versus run knowledge
 
-This lets the UI show whether a recaption or image intervention actually improved the subsequent loss trajectory.
+The **project** is the long-lived body of dataset knowledge: canonical external-source reference, immutable imports, dataset revisions, image lineage, caption history, recurring problem images, and cross-run comparisons.
 
-## Artifacts
+A **dataset revision** is a scratch construction of an effective training set for a model or experiment direction.
 
-Every saved checkpoint/state/sample can be registered with:
+A **run** is an immutable experiment history: exact included assets and captions at start, configuration, loss history, interventions, checkpoints, state exports, and samples.
 
-- type
-- path
-- timestamp
-- file size
-- SHA-256
-- epoch/step and other metadata
-
-A checkpoint therefore belongs to a known run with a known starting dataset and full intervention history.
-
-## Future comparison
-
-Because runs share a project, Fizgig Web can eventually compare experiments and flag hidden differences:
-
-- identical or changed starting captions
-- identical or changed image sets/hashes
-- LoRA versus LoKR
-- learning-rate changes
-- adaptive per-image LR changes
-- recaption provider/task/prompt changes
-- recurring stuck images across runs
-- exclusions and image interventions
-- checkpoint/sample outcomes
-
-The project is the long-lived body of knowledge. A dataset revision is a scratchpad. A run is an immutable experiment history. Trainer sidecars are generated I/O.
+This separation lets multiple Krea/Klein/other-model experiments reuse the same source material without silently mutating one another's inputs.
