@@ -6,6 +6,7 @@ import { SessionProvider } from "./session";
 import "./styles.css";
 import "./data-ui.css";
 import "./prep-refinements.css";
+import "./derivative-hover.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
