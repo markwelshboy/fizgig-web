@@ -18,6 +18,7 @@ A modern browser-based front end for [Fizgig](https://github.com/shootthesound/F
 - `backend/` — FastAPI orchestration/API layer
 - Fizgig remains the source of truth for training scripts and model logic
 - Browser talks to the backend over REST and WebSocket/SSE-style job streams
+- captioning VLMs are independent tools; they do not reuse or constrain Krea/Klein training encoders
 
 ## Current vertical slice
 
@@ -30,21 +31,54 @@ The Start and Captions pages now work against a real server-side dataset folder:
 - browse/search actual dataset images on the Captions page
 - edit and save caption sidecars through FastAPI
 - serve images only from dataset folders registered during the current API session
-- generate captions with Qwen3-VL 4B or Florence-2
+- generate captions with an arbitrary Transformers-compatible Qwen3-VL model or Florence-2
 - regenerate one image into the editor for review before saving
 - generate and save all missing captions with progress feedback
-- choose the upstream Qwen caption preset and edit its captioning instruction
+- choose the upstream Fizgig Qwen caption preset and edit its captioning instruction
 - choose Florence model/task and max-token budget
 - optionally prepend the dataset trigger word
 - lazily keep caption models resident for iterative work and unload them when VRAM is needed
 
-Fizgig's Qwen captioning instruction is editable. Krea 2's separate text-encoding system descriptor is deliberately not changed: it is part of the training/inference conditioning contract and must stay in sync with upstream Fizgig/ComfyUI.
-
 Sampling and training orchestration are still placeholders.
+
+## Caption VLM configuration
+
+Qwen captioning is deliberately decoupled from the model being trained. The default is:
+
+```text
+Qwen/Qwen3-VL-8B-Instruct
+```
+
+Preferences can instead point to:
+
+- another Hugging Face Qwen3-VL repository
+- a persistent local Hugging Face-compatible Qwen3-VL model/checkpoint directory
+- an optional separate processor/tokenizer source
+- an optional branch, tag, or commit revision
+
+The Captions page can override those defaults for one run without changing the saved preference.
+
+A **Download & Select** action snapshots a Hub repository into the configured caption-model directory and makes the resulting local directory the default. The default persistent location is:
+
+```text
+/workspace/Fizgig/models/captioning
+```
+
+Preferences themselves default to:
+
+```text
+/workspace/fizgig-web/preferences.json
+```
+
+and can be redirected with `FIZGIG_WEB_SETTINGS`.
+
+A bare standalone `.safetensors` file is not treated as a complete generic VLM checkpoint because Transformers also needs the architecture/config and processor assets. Put those files together in a Hugging Face-compatible model directory, or use the processor override when the processor lives elsewhere.
+
+Fizgig's Qwen caption preset list and prompt text are still read from upstream `fizgig.krea2.embedder.CAPTION_TASKS` when Fizgig is available. That keeps caption doctrine aligned with upstream auto-recaption behavior without coupling the actual caption model weights to Krea's text encoder.
 
 ## Run the POC locally
 
-For basic dataset browsing/editing you can run the lightweight backend venv:
+Start the API:
 
 ```bash
 cd backend
@@ -54,21 +88,24 @@ pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-For **AI captioning**, run the API from the same Python environment as upstream Fizgig so Torch, Transformers, its Krea/Qwen loader, and model dependencies are available. Point the web layer at the Fizgig checkout if it is not in one of the normal container paths:
+Torch is intentionally expected from the target CUDA/Fizgig environment. Qwen3-VL captioning uses the standard Transformers multimodal generation path. If the chosen model is a Hub ID, normal Hugging Face cache/authentication rules apply.
+
+If upstream Fizgig is installed, point the web layer at it when it is not in one of the normal container paths so the caption preset definitions can be imported:
 
 ```bash
 export FIZGIG_ROOT=/opt/Fizgig
 ```
 
-Qwen captioning uses the Krea 2 Qwen3-VL text-encoder safetensors. Until Preferences persistence is wired, either enter its path in the Captions page or set:
+Optional environment defaults are also supported:
 
 ```bash
-export FIZGIG_QWEN_CAPTION_MODEL=/workspace/models/text_encoders/qwen3vl_4b_fp8_scaled.safetensors
+export FIZGIG_QWEN_CAPTION_MODEL=Qwen/Qwen3-VL-8B-Instruct
+export FIZGIG_QWEN_CAPTION_PROCESSOR=
+export FIZGIG_QWEN_CAPTION_REVISION=
+export FIZGIG_CAPTION_MODEL_DIR=/workspace/Fizgig/models/captioning
 ```
 
-The Qwen preset list and prompt text are read directly from upstream `fizgig.krea2.embedder.CAPTION_TASKS` whenever that checkout is available, keeping the web UI aligned with Fizgig's auto-recaption behavior. The server has fallback labels only so the UI can still render before Fizgig is configured.
-
-Florence models are lazy-downloaded from Hugging Face on first use and follow the pinned revisions used by upstream Fizgig.
+Florence models are loaded independently and follow the model/task choices exposed by the web UI.
 
 In another shell, start the frontend:
 
