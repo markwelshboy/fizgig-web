@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  generateCaption,
   getCaptioningOptions,
   getProjectRevision,
   getProjectRevisionPolicy,
-  inspectDataset,
   updateCaptionValidationPolicy,
   updateProjectAssetPolicy,
   updateProjectCaption,
@@ -15,10 +13,11 @@ import {
   type CaptioningOptions,
   type ProjectRevisionPolicy,
 } from "../api";
+import { generateProjectAssetCaption, preparedProjectAssetUrl } from "../project-captioning-api";
 import { useSession } from "../session";
 
 export function CaptionsPage() {
-  const { project, revision, setRevision, dataset, setDataset, run, triggerWord } = useSession();
+  const { project, revision, setRevision, run, triggerWord } = useSession();
   const initialAsset = revision?.assets.find((asset) => asset.included !== false);
   const [selectedName, setSelectedName] = useState(initialAsset?.filename ?? "");
   const [query, setQuery] = useState("");
@@ -45,7 +44,6 @@ export function CaptionsPage() {
 
   const assets = (revision?.assets ?? []).filter((asset) => asset.included !== false);
   const selectedAsset = assets.find((asset) => asset.filename === selectedName) ?? assets[0];
-  const selectedImage = dataset?.images.find((image) => image.filename === selectedAsset?.filename);
   const [captionDraft, setCaptionDraft] = useState(selectedAsset?.caption ?? "");
 
   const qwenProvider = options?.providers.find((item) => item.id === "qwen" && "tasks" in item);
@@ -93,6 +91,11 @@ export function CaptionsPage() {
     return (policy?.caption_validation.protected_phrases ?? []).filter((phrase) => phrase && haystack.includes(phrase.toLowerCase()));
   }, [captionDraft, policy]);
 
+  function imageUrl(filename: string) {
+    if (!project || !revision) return "";
+    return preparedProjectAssetUrl(project.id, revision.id, filename);
+  }
+
   function selectImage(filename: string) {
     const asset = assets.find((item) => item.filename === filename);
     setSelectedName(filename); setCaptionDraft(asset?.caption ?? ""); setMessage("");
@@ -111,8 +114,8 @@ export function CaptionsPage() {
 
   function captionMetadata() {
     return provider === "qwen"
-      ? { source: "ai", provider, model: qwenModel, processor: qwenProcessor, model_revision: qwenRevision, task: qwenTask, instruction: qwenInstruction, max_tokens: maxTokens, trigger_word_added: addTriggerWord }
-      : { source: "ai", provider, model: florenceModel, task: florenceTask, max_tokens: maxTokens, trigger_word_added: addTriggerWord };
+      ? { source: "ai", provider, model: qwenModel, processor: qwenProcessor, model_revision: qwenRevision, task: qwenTask, instruction: qwenInstruction, max_tokens: maxTokens, trigger_word_added: addTriggerWord, prepared_asset: true }
+      : { source: "ai", provider, model: florenceModel, task: florenceTask, max_tokens: maxTokens, trigger_word_added: addTriggerWord, prepared_asset: true };
   }
 
   async function saveCanonical(filename: string, caption: string, reason: string, metadata: Record<string, unknown>) {
@@ -133,17 +136,17 @@ export function CaptionsPage() {
   }
 
   async function regenerateSelected() {
-    if (!dataset || !selectedAsset) return;
+    if (!project || !revision || !selectedAsset) return;
     setGenerating(true); setMessage(`Captioning ${selectedAsset.filename}…`);
     try {
-      const result = await generateCaption(dataset.id, selectedAsset.filename, generationRequest());
+      const result = await generateProjectAssetCaption(project.id, revision.id, selectedAsset.filename, generationRequest());
       setCaptionDraft(result.caption);
-      setMessage("Generated caption is in the editor. Review it, then Save Caption to commit it to project history.");
+      setMessage("Generated from the prepared project asset. Review it, then Save Caption to commit it to project history.");
     } catch (err) { setMessage(err instanceof Error ? err.message : "Caption generation failed"); } finally { setGenerating(false); }
   }
 
   async function generateMissing() {
-    if (!dataset || !revision) return;
+    if (!project || !revision) return;
     const missing = assets.filter((asset) => !asset.caption.trim());
     if (!missing.length) { setMessage("All included working assets already have captions."); return; }
     setGenerating(true); setMessage("");
@@ -152,13 +155,12 @@ export function CaptionsPage() {
       for (const asset of missing) {
         setBulkProgress(`${completed + failed + 1} / ${missing.length} · ${asset.filename}`);
         try {
-          const result = await generateCaption(dataset.id, asset.filename, generationRequest());
+          const result = await generateProjectAssetCaption(project.id, revision.id, asset.filename, generationRequest());
           await saveCanonical(asset.filename, result.caption, "ai_generate_missing", captionMetadata());
           if (asset.filename === selectedAsset?.filename) setCaptionDraft(result.caption);
           completed += 1;
         } catch (err) { failed += 1; setMessage(err instanceof Error ? err.message : `Failed on ${asset.filename}`); }
       }
-      setDataset(await inspectDataset(revision.files_path));
       await refreshRevision();
       setMessage(`Generate Missing finished: ${completed} committed to project history${failed ? `, ${failed} failed` : ""}.`);
     } finally { setBulkProgress(""); setGenerating(false); }
@@ -191,10 +193,10 @@ export function CaptionsPage() {
     } catch (err) { setMessage(err instanceof Error ? err.message : "Unable to save asset policy"); } finally { setPolicySaving(false); }
   }
 
-  if (!project || !revision || !dataset) return <section className="panel hero-panel stack"><p className="eyebrow">Project required</p><h1>Captions</h1><p className="muted">Open a project and working dataset on the Start page first.</p></section>;
+  if (!project || !revision) return <section className="panel hero-panel stack"><p className="eyebrow">Project required</p><h1>Captions</h1><p className="muted">Open a project and working revision on the Start page first.</p></section>;
 
   return <div className="stack">
-    <header className="page-header"><div><p className="eyebrow">{project.name} · {revision.name}</p><h1>Captions</h1><p className="muted">Only the included Image Prep working set appears here. Project JSON is authoritative; trainer .txt sidecars are generated only when Fizgig needs them.</p></div><div className="actions"><button className="primary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div></header>
+    <header className="page-header"><div><p className="eyebrow">{project.name} · {revision.name}</p><h1>Captions</h1><p className="muted">Only the included Image Prep working set appears here. The exact prepared project pixels shown here are also the pixels sent to the caption model. Project JSON remains authoritative.</p></div><div className="actions"><button className="primary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div></header>
 
     <section className="panel stack">
       <div><p className="eyebrow">Caption policy</p><div className="card-title">Validation & protected traits</div><p className="muted">Protected phrases are traits you want the LoRA to learn rather than repeatedly name. Fizgig flags them instead of silently deleting them. The trigger word is always exempt from spellcheck.</p></div>
@@ -206,10 +208,10 @@ export function CaptionsPage() {
     </section>
 
     <div className="caption-layout">
-      <section className="panel"><div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="thumb-grid caption-grid">{visibleAssets.map((asset) => { const image = dataset.images.find((item) => item.filename === asset.filename); const p = { training_policy: "automatic", auto_recaption_policy: "automatic", ...(policy?.assets[asset.filename] ?? {}) }; return image ? <button className={`thumb caption-thumb ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} key={asset.filename} onClick={() => selectImage(asset.filename)} title={asset.filename}><img src={image.image_url} alt={asset.filename} />{!asset.caption.trim() && <span className="missing-dot" title="Missing caption" />}{p.training_policy === "always_train" && <span className="badge" title="Always Train policy override">Train</span>}</button> : null; })}</div></section>
-      <section className="panel stack">{selectedAsset && selectedImage ? <>
+      <section className="panel"><div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="thumb-grid caption-grid">{visibleAssets.map((asset) => { const p = { training_policy: "automatic", auto_recaption_policy: "automatic", ...(policy?.assets[asset.filename] ?? {}) }; return <button className={`thumb caption-thumb ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} key={asset.filename} onClick={() => selectImage(asset.filename)} title={asset.filename}><img src={imageUrl(asset.filename)} alt={asset.filename} />{!asset.caption.trim() && <span className="missing-dot" title="Missing caption" />}{p.training_policy === "always_train" && <span className="badge" title="Always Train policy override">Train</span>}</button>; })}</div></section>
+      <section className="panel stack">{selectedAsset ? <>
         <div><div className="card-title">{selectedAsset.filename}</div><div className="muted">{assets.findIndex((asset) => asset.filename === selectedAsset.filename) + 1} / {assets.length} · canonical project caption</div></div>
-        <div className="caption-preview"><img src={selectedImage.image_url} alt={selectedAsset.filename} /></div>
+        <div className="caption-preview"><img src={imageUrl(selectedAsset.filename)} alt={selectedAsset.filename} /></div>
         <label>Caption<textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} /></label>
         {protectedMatches.length > 0 && <div className="notice error">Protected phrase{protectedMatches.length === 1 ? "" : "s"} present: <strong>{protectedMatches.join(", ")}</strong>. Review before training.</div>}
         {message && <div className={message.includes("failed") || message.includes("requires") || message.includes("not configured") ? "notice error" : "notice success"}>{message}</div>}
