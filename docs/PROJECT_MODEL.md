@@ -7,9 +7,10 @@ Fizgig Web treats a LoRA project as a reproducible experiment history, not as a 
 1. **The user's external dataset is the canonical source.** Fizgig Web never modifies it.
 2. **A project creates an immutable import snapshot.** This is an archival starting point for reproducibility, not a replacement canonical source.
 3. **All model-specific datasets are scratch working sets.** Image Prep, caption generation, training-time recaptioning, exclusions, brightness fixes, face crops, resizing, etc. happen only in project-owned working copies.
-4. **A run snapshots its exact effective dataset before training.** That includes image hashes and the exact starting caption text for every image.
-5. **Mutations are events, not lost state.** Caption changes, image derivations, exclusions, per-image LR changes, checkpoints, trainer states, samples, and manual interventions are recorded.
-6. **Artifacts are identified by hash.** A safetensor or state export is meaningful only together with the dataset/config/history that produced it.
+4. **Caption state is canonical in project JSON, not in `.txt` sidecars.** Sidecars are generated compatibility files for Fizgig/trainer subprocesses.
+5. **A run snapshots its exact effective dataset before training.** That includes image hashes and the exact starting caption text for every image.
+6. **Mutations are events, not lost state.** Caption changes, image derivations, exclusions, per-image LR changes, checkpoints, trainer states, samples, and manual interventions are recorded.
+7. **Artifacts are identified by hash.** A safetensor or state export is meaningful only together with the dataset/config/history that produced it.
 
 ## Layout
 
@@ -23,14 +24,14 @@ projects/<project-id>/
 │       ├── manifest.json
 │       └── files/
 │           ├── image_0001.png
-│           ├── image_0001.txt
+│           ├── image_0001.txt        # immutable imported source snapshot only
 │           └── ...
 │
 ├── datasets/
 │   ├── ds-0001/
-│   │   ├── manifest.json
+│   │   ├── manifest.json             # canonical working captions + asset state
 │   │   ├── prep.json
-│   │   └── files/               # scratch working dataset
+│   │   └── files/                    # scratch images + generated trainer sidecars
 │   └── ds-0002/
 │       └── ...
 │
@@ -96,9 +97,34 @@ or from another scratch revision:
 
 No scratch dataset is ever promoted to canonical source automatically.
 
+## Captions: project state first, sidecars second
+
+For every asset in a scratch revision, `manifest.json` owns the current caption:
+
+```json
+{
+  "filename": "referenceimage_00042.png",
+  "caption": "the current project caption",
+  "caption_sha256": "...",
+  "caption_updated_at": "..."
+}
+```
+
+Manual edits and AI recaptions update this JSON state first and append a provenance event containing the old/new text and the model/prompt that caused the change.
+
+The `.txt` file beside the image is **not** authoritative. It exists only because upstream Fizgig and trainer subprocesses expect same-basename sidecars.
+
+Fizgig Web materializes sidecars from project JSON:
+
+- immediately before preparing/starting a run;
+- when a live training-time recaption/manual edit must be pushed into the trainer's scratch dataset;
+- on explicit compatibility/export operations.
+
+This makes the filesystem dataset a shim to the trainer rather than the source of project knowledge. If a sidecar and the manifest ever disagree, the manifest wins and the sidecar is regenerated.
+
 ## Run snapshot
 
-Immediately before training begins, the chosen scratch dataset is frozen logically into `dataset_snapshot.json`.
+Immediately before training begins, captions are materialized from the revision manifest and the chosen scratch dataset is frozen logically into `dataset_snapshot.json`.
 
 For every image it records at minimum:
 
@@ -115,7 +141,7 @@ For every image it records at minimum:
 }
 ```
 
-This is the immutable start point for that run. The actual scratch `.txt` files can then change during training without destroying reproducibility.
+This is the immutable start point for that run. During training, project/run events preserve every subsequent caption or image intervention even though the trainer-facing scratch files may be regenerated or replaced.
 
 ## Event history
 
@@ -127,6 +153,7 @@ Expected run events include:
 - `training_started`
 - `training_stopped`
 - `training_resumed`
+- `trainer_captions_materialized`
 - `image_status_changed`
 - `per_image_lr_changed`
 - `caption_changed`
@@ -188,4 +215,4 @@ Because runs share a project, Fizgig Web can eventually compare experiments and 
 - exclusions and image interventions
 - checkpoint/sample outcomes
 
-The project is the long-lived body of knowledge. A dataset revision is a scratchpad. A run is an immutable experiment history.
+The project is the long-lived body of knowledge. A dataset revision is a scratchpad. A run is an immutable experiment history. Trainer sidecars are generated I/O.
