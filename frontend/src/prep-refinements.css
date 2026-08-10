@@ -2,13 +2,15 @@
   height: 100%;
 }
 
-.processed-image {
+.processed-image,
+.fixed-review-card {
   aspect-ratio: 1 / 1 !important;
   display: grid;
   place-items: center;
 }
 
-.processed-image img {
+.processed-image img,
+.fixed-review-card img {
   width: 100%;
   height: 100%;
   object-fit: contain;
@@ -29,7 +31,115 @@
   object-fit: contain;
 }
 
+.live-crop-preview {
+  max-height: 620px;
+  overflow: hidden;
+}
+
 .prep-image-meta .status-good,
 .prep-image-meta .status-suspect {
   font-weight: 600;
+}
+
+.bucket-preview {
+  margin-top: 8px;
+  padding: 16px;
+  border: 1px solid #2b3d57;
+  border-radius: 14px;
+  background: #0a1422;
+}
+
+.bucket-summary {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 2px 8px;
+  align-items: baseline;
+  color: #8597af;
+  font-size: 11px;
+}
+
+.bucket-summary strong {
+  color: #eef3ff;
+  font-size: 18px;
+  text-align: right;
+}
+
+.bucket-group-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.bucket-group {
+  border: 1px solid #273a52;
+  border-radius: 10px;
+  background: #0d1929;
+  overflow: hidden;
+}
+
+.bucket-group summary {
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 12px;
+  list-style: none;
+}
+
+.bucket-group summary::-webkit-details-marker { display: none; }
+.bucket-group summary span { color: #8597af; font-size: 11px; }
+.bucket-file-list { display: grid; gap: 5px; padding: 0 12px 12px; color: #90a1b8; font-size: 10px; overflow-wrap: anywhere; }
+.crop-review-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+.resolution-copy { line-height: 1.35; }
+
+.project-row-shell {
+  position: relative;
+}
+
+.project-row-shell .project-row {
+  padding-right: 50px;
+}
+
+.recent-remove {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  border: 1px solid #33465f;
+  background: #101b2a;
+  color: #93a4bb;
+  font-size: 18px;
+}
+
+.recent-remove:hover {
+  border-color: #8a4f62;
+  color: #fecdd3;
+  background: #2a1520;
+}
+
+.close-project-button {
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.close-project-button:hover {
+  color: #fecdd3;
+  background: rgba(127, 29, 29, .14);
+}
+
+@media (max-width: 1200px) {
+  .bucket-group-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 640px) {
+  .bucket-group-grid { grid-template-columns: 1fr; }
 }
