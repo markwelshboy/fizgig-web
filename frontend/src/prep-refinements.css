@@ -21,8 +21,6 @@
 
 .face-proposal-stage { position: relative; aspect-ratio: 1 / 1; overflow: hidden; display: grid; place-items: center; background: #07101c; }
 .face-proposal-stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
-/* The proposal canvas itself must retain the source aspect. A max-height here used
-   to squash portrait canvases while leaving percentage crop coordinates unchanged. */
 .face-proposal-native { position: relative; width: 100%; overflow: hidden; display: block; background: #07101c; }
 .face-proposal-native img { width: 100%; height: 100%; object-fit: fill; display: block; }
 .face-crop-box { position: absolute; border: 2px solid #9da9ff; box-shadow: 0 0 0 9999px rgba(3,8,15,.48), 0 0 0 1px rgba(255,255,255,.28) inset; pointer-events: none; }
@@ -68,7 +66,6 @@
 .project-identity { display: grid; justify-items: end; gap: 2px; color: #8395ad; font-size: 10px; }
 .project-identity strong, .project-id-line { color: #b2c1d7; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-/* Stage 1 source cards retain their full source on hover. */
 .prep-image-wrap { position: relative; overflow: hidden; }
 .prep-image-wrap img { transition: object-fit .12s ease, opacity .16s ease, filter .16s ease; }
 .prep-focus-button:hover .prep-image-wrap img { object-fit: contain !important; background: #06101c; }
@@ -76,7 +73,6 @@
 .prep-image-card.excluded:hover { opacity: .72; }
 .prep-image-card.excluded::after { content: "Excluded"; position: absolute; right: 7px; bottom: 7px; padding: 3px 6px; border-radius: 6px; background: rgba(8,17,31,.9); color: #f0a8b5; font-size: 10px; pointer-events: none; }
 
-/* Saved transform state should be legible even while the editor is collapsed. */
 .transform-state-line { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 3px; color: #98abc3; font-size: 10px; }
 .transform-state-line .changed { color: #c4a7ff; }
 .transform-badge { position: absolute; right: 7px; top: 7px; z-index: 3; padding: 3px 6px; border-radius: 999px; background: rgba(76,29,149,.88); border: 1px solid #8b5cf6; color: #f1e9ff; font-size: 9px; }
@@ -101,6 +97,31 @@
 .training-direction-grid .model-card { width: 100%; min-height: 92px; display: grid; place-content: center; text-align: center; }
 .training-direction-grid .model-card span { color: #b7c4d7; }
 
+/* Project-source selection is intentionally compact because archives may contain hundreds of assets. */
+.source-selection-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; gap: 16px; align-items: end; padding: 12px 0 4px; }
+.source-filter-label { max-width: 620px; }
+.source-filter-label small { color: #8193aa; }
+.source-filter-label code { color: #c4a7ff; background: rgba(91,33,182,.16); padding: 1px 4px; border-radius: 4px; }
+.source-filter-shell { position: relative; }
+.source-filter-shell input { position: relative; z-index: 2; background: transparent; }
+.filter-star { position: absolute; z-index: 1; left: 12px; top: 50%; transform: translateY(-50%); color: #64748b; pointer-events: none; }
+.hidden-star { display: none; }
+.source-filter-status { display: grid; grid-template-columns: auto auto; gap: 1px 7px; align-items: baseline; color: #8294ad; font-size: 11px; padding-bottom: 2px; }
+.source-filter-status strong { color: #eef3ff; font-size: 16px; text-align: right; }
+.source-bulk-actions { justify-content: flex-end; }
+.source-selection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(145px, 180px)); gap: 10px; align-items: start; justify-content: start; }
+.source-selection-card { width: 100%; min-width: 0; padding: 0; overflow: hidden; text-align: left; position: relative; }
+.source-selection-image { aspect-ratio: 1 / 1; display: grid; place-items: center; background: #06101c; }
+.source-selection-image img { width: 100%; height: 100%; object-fit: cover; }
+.source-selection-card:hover .source-selection-image img { object-fit: contain; }
+.source-selection-card .prep-image-meta { padding: 7px 8px 8px; }
+.source-selection-card .prep-image-meta strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; }
+.caption-badge, .selection-check { position: absolute; z-index: 4; top: 7px; width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font-size: 10px; font-weight: 700; box-shadow: 0 3px 12px rgba(0,0,0,.35); }
+.caption-badge { right: 7px; background: rgba(76,29,149,.94); border: 1px solid #a78bfa; color: white; }
+.selection-check { left: 7px; background: rgba(9,22,37,.92); border: 1px solid #52657e; color: #86efac; }
+.source-selection-card.selected { border-color: #2dd4bf; box-shadow: inset 0 0 0 1px rgba(45,212,191,.22); }
+.source-selection-card.excluded::after { content: none; }
+
 .project-row-shell { position: relative; }
 .project-row-shell .project-row { padding-right: 50px; }
 .recent-remove { position: absolute; top: 50%; right: 12px; transform: translateY(-50%); width: 28px; height: 28px; padding: 0; display: grid; place-items: center; border-radius: 8px; border: 1px solid #33465f; background: #101b2a; color: #93a4bb; font-size: 18px; }
@@ -113,6 +134,8 @@
   .crop-review-editor { grid-template-columns: 1fr; }
   .summary-ledger { grid-template-columns: 150px 150px 1fr; }
   .project-source-ledger, .source-accounting-ledger { grid-template-columns: 170px 140px 1fr; }
+  .source-selection-toolbar { grid-template-columns: 1fr auto; }
+  .source-bulk-actions { grid-column: 1 / -1; justify-content: flex-start; }
 }
 @media (max-width: 800px) {
   .tuning-grid { grid-template-columns: 1fr; }
@@ -122,5 +145,7 @@
   .summary-ledger > div { display: grid; grid-template-columns: 1fr 1fr; }
   .summary-ledger small { grid-column: 1 / -1; }
   .training-direction-grid { grid-template-columns: 1fr; }
+  .source-selection-toolbar { grid-template-columns: 1fr; }
+  .source-selection-grid { grid-template-columns: repeat(auto-fill, minmax(125px, 1fr)); }
 }
 @media (max-width: 640px) { .bucket-group-grid { grid-template-columns: 1fr; } }
