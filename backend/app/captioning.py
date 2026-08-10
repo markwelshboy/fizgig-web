@@ -7,6 +7,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from .settings import load_settings
+
 FLORENCE_DEFAULT_MODEL = "MiaoshouAI/Florence-2-base-PromptGen"
 FLORENCE_MODELS = [
     FLORENCE_DEFAULT_MODEL,
@@ -23,8 +25,9 @@ FLORENCE_CODE_REVISIONS = {
 }
 FLORENCE_TASKS = ["<CAPTION>", "<DETAILED_CAPTION>", "<MORE_DETAILED_CAPTION>"]
 
-# Fallbacks only. When upstream Fizgig is available we read CAPTION_TASKS directly from it so
-# fizgig-web cannot silently drift from the trainer's auto-recaption doctrine.
+# These are fallbacks only. If upstream Fizgig is installed, its CAPTION_TASKS remains the
+# source of truth for prompt presets. The caption VLM itself is intentionally independent from
+# Fizgig's Krea/Klein training text encoder.
 FALLBACK_QWEN_TASKS = {
     "training": {
         "label": "Training caption (viewpoint-aware)",
@@ -101,13 +104,29 @@ def add_trigger(caption: str, trigger_word: str) -> str:
     return f"{trigger_word}, {caption}" if caption else trigger_word
 
 
-class CaptionService:
-    """Lazy, process-local caption model cache.
+def download_qwen_snapshot(repo_id: str, *, revision: str = "", model_dir: str = "") -> str:
+    """Download an arbitrary Hugging Face Qwen3-VL checkpoint to a persistent local directory."""
+    if not repo_id.strip() or Path(repo_id).expanduser().exists():
+        raise ValueError("Download expects a Hugging Face repository ID, not a local path")
+    try:
+        from huggingface_hub import snapshot_download
+    except Exception as exc:
+        raise RuntimeError("huggingface_hub is required for model downloads") from exc
 
-    Generation is serialized because both providers own substantial GPU state. Keeping models
-    resident makes iterative Regenerate and Generate Missing useful; unload() is available before
-    training when VRAM needs to be reclaimed.
-    """
+    settings = load_settings()
+    root = Path(model_dir or settings.caption_model_dir).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    local = root / repo_id.strip().replace("/", "--")
+    resolved = snapshot_download(
+        repo_id=repo_id.strip(),
+        revision=revision.strip() or None,
+        local_dir=str(local),
+    )
+    return str(Path(resolved).resolve())
+
+
+class CaptionService:
+    """Lazy process-local caption model cache, independent from training encoders."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -115,18 +134,24 @@ class CaptionService:
         self._florence_processor = None
         self._florence_device = None
         self._florence_name = None
-        self._qwen = None
-        self._qwen_path = None
+        self._qwen_model = None
+        self._qwen_processor = None
+        self._qwen_key: tuple[str, str, str] | None = None
 
     def options(self) -> dict[str, Any]:
+        settings = load_settings()
         return {
             "providers": [
                 {
                     "id": "qwen",
-                    "name": "Qwen3-VL 4B",
+                    "name": "Qwen3-VL",
                     "tasks": qwen_tasks(),
                     "default_task": "training",
+                    "default_model": settings.qwen_caption_model,
+                    "default_processor": settings.qwen_caption_processor,
+                    "default_revision": settings.qwen_caption_revision,
                     "supports_instruction_override": True,
+                    "supports_arbitrary_model": True,
                 },
                 {
                     "id": "florence",
@@ -147,6 +172,8 @@ class CaptionService:
         image_path: Path,
         model: str | None = None,
         model_path: str | None = None,
+        processor: str | None = None,
+        revision: str | None = None,
         task: str | None = None,
         instruction: str | None = None,
         max_tokens: int | None = None,
@@ -155,7 +182,9 @@ class CaptionService:
             if provider == "qwen":
                 return self._generate_qwen(
                     image_path,
-                    model_path=model_path,
+                    model_source=(model_path or model or "").strip(),
+                    processor_source=(processor or "").strip(),
+                    revision=(revision or "").strip(),
                     task=task or "training",
                     instruction=instruction,
                     max_tokens=max_tokens,
@@ -173,48 +202,85 @@ class CaptionService:
         self,
         image_path: Path,
         *,
-        model_path: str | None,
+        model_source: str,
+        processor_source: str,
+        revision: str,
         task: str,
         instruction: str | None,
         max_tokens: int | None,
     ) -> str:
-        _ensure_fizgig_importable()
+        settings = load_settings()
+        model_source = model_source or settings.qwen_caption_model
+        processor_source = processor_source or settings.qwen_caption_processor or model_source
+        revision = revision or settings.qwen_caption_revision
+        if not model_source:
+            raise RuntimeError("Qwen caption model is not configured in Preferences")
+
         try:
             import torch
-            from fizgig.krea2.embedder import generate_caption
-            from fizgig.krea2.utils import load_krea2_text_encoder
+            from PIL import Image
+            from transformers import AutoModelForImageTextToText, AutoProcessor
         except Exception as exc:
             raise RuntimeError(
-                "Qwen captioning requires the upstream Fizgig Python environment. Set FIZGIG_ROOT "
-                "to the Fizgig checkout and run this API from its venv/container."
+                "Qwen3-VL captioning requires torch, Pillow and a Transformers version with Qwen3-VL support"
             ) from exc
 
-        resolved_path = (model_path or os.environ.get("FIZGIG_QWEN_CAPTION_MODEL", "")).strip()
-        if not resolved_path or not Path(resolved_path).expanduser().is_file():
-            raise RuntimeError(
-                "Qwen3-VL text-encoder path is not configured. Set it in Preferences or "
-                "FIZGIG_QWEN_CAPTION_MODEL."
-            )
-        resolved_path = str(Path(resolved_path).expanduser().resolve())
-
-        if self._qwen is None or self._qwen_path != resolved_path:
+        key = (model_source, processor_source, revision)
+        if self._qwen_model is None or self._qwen_key != key:
             self._drop_qwen()
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            self._qwen = load_krea2_text_encoder(resolved_path, dtype=torch.bfloat16, device=device)
-            self._qwen_path = resolved_path
+            model_kwargs: dict[str, Any] = {
+                "revision": revision or None,
+                "torch_dtype": torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            }
+            if torch.cuda.is_available():
+                model_kwargs["device_map"] = "auto"
+            self._qwen_processor = AutoProcessor.from_pretrained(
+                processor_source,
+                revision=revision or None,
+            )
+            self._qwen_model = AutoModelForImageTextToText.from_pretrained(
+                model_source,
+                **model_kwargs,
+            ).eval()
+            if not torch.cuda.is_available():
+                self._qwen_model = self._qwen_model.to("cpu")
+            self._qwen_key = key
 
         tasks = qwen_tasks()
         preset = tasks.get(task, tasks.get("training", FALLBACK_QWEN_TASKS["training"]))
         resolved_instruction = (instruction or "").strip() or str(preset["instruction"])
         resolved_tokens = max_tokens or int(preset["max_tokens"])
-        return str(
-            generate_caption(
-                self._qwen,
-                str(image_path),
-                max_new_tokens=resolved_tokens,
-                instruction=resolved_instruction,
-            )
-        ).strip()
+
+        image = Image.open(image_path).convert("RGB")
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "image", "image": image},
+                    {"type": "text", "text": resolved_instruction},
+                ],
+            }
+        ]
+        inputs = self._qwen_processor.apply_chat_template(
+            messages,
+            tokenize=True,
+            add_generation_prompt=True,
+            return_dict=True,
+            return_tensors="pt",
+        )
+        inputs.pop("token_type_ids", None)
+        device = getattr(self._qwen_model, "device", None)
+        if device is not None:
+            inputs = inputs.to(device)
+
+        generated = self._qwen_model.generate(**inputs, max_new_tokens=resolved_tokens, do_sample=False)
+        trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated)]
+        decoded = self._qwen_processor.batch_decode(
+            trimmed,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+        return str(decoded[0]).strip()
 
     def _generate_florence(self, image_path: Path, *, model: str, task: str, max_tokens: int) -> str:
         if model not in FLORENCE_MODELS:
@@ -233,10 +299,7 @@ class CaptionService:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             revision = FLORENCE_REVISIONS.get(model)
             code_revision = FLORENCE_CODE_REVISIONS.get(model)
-            kwargs = {
-                "revision": revision,
-                "trust_remote_code": True,
-            }
+            kwargs: dict[str, Any] = {"revision": revision, "trust_remote_code": True}
             if code_revision:
                 kwargs["code_revision"] = code_revision
             self._florence_processor = AutoProcessor.from_pretrained(model, **kwargs)
@@ -271,7 +334,7 @@ class CaptionService:
     def unload(self) -> list[str]:
         with self._lock:
             unloaded: list[str] = []
-            if self._qwen is not None:
+            if self._qwen_model is not None:
                 self._drop_qwen()
                 unloaded.append("qwen")
             if self._florence_model is not None:
@@ -287,8 +350,9 @@ class CaptionService:
             return unloaded
 
     def _drop_qwen(self) -> None:
-        self._qwen = None
-        self._qwen_path = None
+        self._qwen_model = None
+        self._qwen_processor = None
+        self._qwen_key = None
 
     def _drop_florence(self) -> None:
         self._florence_model = None
