@@ -5,6 +5,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from .project_captions import project_caption_store
 from .projects import project_store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
@@ -41,6 +42,14 @@ class ArtifactCreate(BaseModel):
     type: str
     path: str
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class ProjectCaptionUpdate(BaseModel):
+    caption: str
+    reason: str = "manual_edit"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    materialize: bool = False
+    run_id: str | None = None
 
 
 def _not_found(exc: Exception) -> HTTPException:
@@ -99,9 +108,52 @@ def get_revision(project_id: str, revision_id: str) -> dict[str, Any]:
         raise _not_found(exc) from exc
 
 
+@router.get("/{project_id}/revisions/{revision_id}/captions/{filename}")
+def get_project_caption(project_id: str, revision_id: str, filename: str) -> dict[str, Any]:
+    try:
+        return project_caption_store.get_caption(project_id, revision_id, filename)
+    except FileNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
+@router.put("/{project_id}/revisions/{revision_id}/captions/{filename}")
+def update_project_caption(
+    project_id: str,
+    revision_id: str,
+    filename: str,
+    request: ProjectCaptionUpdate,
+) -> dict[str, Any]:
+    try:
+        return project_caption_store.set_caption(
+            project_id,
+            revision_id,
+            filename,
+            request.caption,
+            reason=request.reason,
+            metadata=request.metadata,
+            materialize=request.materialize,
+            run_id=request.run_id,
+        )
+    except FileNotFoundError as exc:
+        raise _not_found(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{project_id}/revisions/{revision_id}/materialize-captions")
+def materialize_project_captions(project_id: str, revision_id: str) -> dict[str, Any]:
+    try:
+        return project_caption_store.materialize_revision(project_id, revision_id)
+    except FileNotFoundError as exc:
+        raise _not_found(exc) from exc
+
+
 @router.post("/{project_id}/runs")
 def create_run(project_id: str, request: RunCreate) -> dict[str, Any]:
     try:
+        # Sidecars are a trainer compatibility shim, never canonical state. Rebuild them from
+        # the revision manifest immediately before the run snapshot/launch path consumes them.
+        project_caption_store.materialize_revision(project_id, request.dataset_revision)
         return project_store.create_run(
             project_id,
             name=request.name,
