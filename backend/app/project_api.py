@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
@@ -10,7 +12,7 @@ from .projects import project_store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
-class ProjectCreate(BaseModel): name: str; source_path: str; trigger_word: str = ""; description: str = ""
+class ProjectCreate(BaseModel): name: str; source_path: str; trigger_word: str = ""; description: str = ""; selected_filenames: list[str] = Field(default_factory=list)
 class RevisionCreate(BaseModel): name: str; model_family: str = "generic"; parent_revision: str | None = None; import_id: str | None = None
 class RunCreate(BaseModel): name: str; model_family: str; dataset_revision: str; trigger_word: str = ""; config: dict[str, Any] = Field(default_factory=dict)
 class RunEventCreate(BaseModel): type: str; payload: dict[str, Any] = Field(default_factory=dict)
@@ -27,11 +29,71 @@ class FaceCropAcceptRequest(BaseModel): proposals: list[dict[str, Any]] = Field(
 
 def _not_found(exc: Exception) -> HTTPException: return HTTPException(status_code=404, detail=str(exc))
 
+def _write_json(path: Path, value: Any) -> None:
+    path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+def _restrict_project_to_selection(result: dict[str, Any], selected: list[str]) -> dict[str, Any]:
+    """Creation snapshots the source first; this reduces that snapshot and initial project assets to the user's explicit selection."""
+    if not selected:
+        return result
+    wanted = set(selected)
+    project = result["project"]
+    revision = result["revision"]
+    project_dir = project_store.project_dir(project["id"])
+    import_id = project["current_import"]
+    import_dir = project_dir / "imports" / import_id
+    import_manifest_path = import_dir / "manifest.json"
+    import_manifest = json.loads(import_manifest_path.read_text(encoding="utf-8"))
+    available = {a["filename"] for a in import_manifest.get("assets", [])}
+    unknown = wanted - available
+    if unknown:
+        raise ValueError(f"Selected source assets are not present: {', '.join(sorted(unknown))}")
+    if not wanted:
+        raise ValueError("Select at least one source asset")
+
+    def prune_files(files_dir: Path) -> None:
+        for path in files_dir.iterdir():
+            if not path.is_file():
+                continue
+            owner = path.name if path.suffix.lower() != ".txt" else path.with_suffix("").name
+            # Captions are paired by image stem; retain only captions belonging to selected images.
+            selected_stems = {Path(name).stem for name in wanted}
+            if path.suffix.lower() == ".txt":
+                keep = path.stem in selected_stems
+            else:
+                keep = path.name in wanted
+            if not keep:
+                path.unlink()
+
+    import_manifest["assets"] = [a for a in import_manifest.get("assets", []) if a["filename"] in wanted]
+    import_manifest["image_count"] = len(import_manifest["assets"])
+    prune_files(Path(import_manifest["files_path"]))
+    _write_json(import_manifest_path, import_manifest)
+
+    revision_dir = project_dir / "datasets" / revision["id"]
+    revision_manifest_path = revision_dir / "manifest.json"
+    revision_manifest = json.loads(revision_manifest_path.read_text(encoding="utf-8"))
+    revision_manifest["assets"] = [a for a in revision_manifest.get("assets", []) if a["filename"] in wanted]
+    prune_files(Path(revision_manifest["files_path"]))
+    _write_json(revision_manifest_path, revision_manifest)
+
+    project_path = project_dir / "project.json"
+    persisted = json.loads(project_path.read_text(encoding="utf-8"))
+    for item in persisted.get("imports", []):
+        if item["id"] == import_id: item["image_count"] = len(wanted)
+    for item in persisted.get("dataset_revisions", []):
+        if item["id"] == revision["id"]: item["image_count"] = len(wanted)
+    _write_json(project_path, persisted)
+    return {"project": project_store.get_project(project["id"]), "revision": project_store.get_revision(project["id"], revision["id"])}
+
 @router.get("")
 def list_projects(): return project_store.list_projects()
 @router.post("")
 def create_project(request: ProjectCreate):
-    try: return project_store.create_project(name=request.name, source_path=request.source_path, trigger_word=request.trigger_word, description=request.description)
+    try:
+        if request.selected_filenames == []: raise ValueError("Select at least one source asset")
+        result = project_store.create_project(name=request.name, source_path=request.source_path, trigger_word=request.trigger_word, description=request.description)
+        return _restrict_project_to_selection(result, request.selected_filenames)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 @router.get("/{project_id}")
