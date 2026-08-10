@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
 pydantic
+Pillow
+huggingface_hub
+accelerate
+transformers>=4.57.0
 
-# AI captioning reuses the upstream Fizgig environment for torch, transformers,
-# Pillow and the Krea/Qwen loader instead of pinning a second ML stack here.
+# torch is intentionally supplied by the target Fizgig/CUDA runtime rather than installed here.
+# Qwen3-VL captioning is now a standalone Transformers VLM and no longer reuses Krea's training encoder.
