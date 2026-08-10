@@ -1,0 +1,49 @@
+/* Image Prep hierarchy: preparation first, then the project-owned working set. */
+.image-prep-v4 > section.panel:nth-of-type(2) { order: 1; }
+.image-prep-v4 > section.panel:nth-of-type(1) { order: 2; }
+.image-prep-v4 > section.panel:nth-of-type(3) { order: 3; }
+.image-prep-v4 > section.panel:nth-of-type(4) { order: 4; }
+.image-prep-v4 > section.panel:nth-of-type(5) { order: 5; }
+.image-prep-v4 > section.panel:nth-of-type(6) { order: 6; }
+.image-prep-v4 > section.panel:nth-of-type(7) { order: 7; }
+.image-prep-v4 > header { order: 0; }
+.image-prep-v4 > .prep-toast { order: 99; }
+
+/* Global preparation is not tied to an arbitrary representative image. The working-asset grid below is the preview. */
+.image-prep-v4 > section.panel:nth-of-type(2) .image-stepper,
+.image-prep-v4 > section.panel:nth-of-type(2) .composition-preview { display: none !important; }
+.image-prep-v4 > section.panel:nth-of-type(2) .composition-preview-row { display: block !important; }
+.image-prep-v4 > section.panel:nth-of-type(2) .composition-preview-row > .stack { width: 100%; }
+.image-prep-v4 > section.panel:nth-of-type(2) .form-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.image-prep-v4 > section.panel:nth-of-type(2) .tuning-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; }
+
+/* Re-label the old Stage 2 presentation as the first part of Stage 1. */
+.image-prep-v4 > section.panel:nth-of-type(2) .prep-section-heading .eyebrow { font-size: 0; }
+.image-prep-v4 > section.panel:nth-of-type(2) .prep-section-heading .eyebrow::after { content: "STAGE 1 · GLOBAL PREPARATION"; font-size: 10px; }
+.image-prep-v4 > section.panel:nth-of-type(2) .prep-section-heading .card-title { font-size: 0; }
+.image-prep-v4 > section.panel:nth-of-type(2) .prep-section-heading .card-title::after { content: "Global Image Preparation"; font-size: 16px; }
+.image-prep-v4 > section.panel:nth-of-type(2) .prep-section-heading .muted { font-size: 0; }
+.image-prep-v4 > section.panel:nth-of-type(2) .prep-section-heading .muted::after { content: "Set the default composition and tonal treatment for Base Project Assets. Changes are previewed across the working asset cards below; per-image exceptions can be applied later."; font-size: 12px; }
+
+/* The asset chooser is the second half of Stage 1, not a second workflow stage. */
+.image-prep-v4 > section.panel:nth-of-type(1) .prep-section-heading .eyebrow { font-size: 0; }
+.image-prep-v4 > section.panel:nth-of-type(1) .prep-section-heading .eyebrow::after { content: "STAGE 1 · WORKING SET"; font-size: 10px; }
+.image-prep-v4 > section.panel:nth-of-type(1) .prep-section-heading .muted { font-size: 0; }
+.image-prep-v4 > section.panel:nth-of-type(1) .prep-section-heading .muted::after { content: "Choose which Base Project Assets and Project Derivatives remain in the working set carried forward to training."; font-size: 12px; }
+
+/* These are project-owned copies now, not the external source. */
+.image-prep-v4 > section.panel:nth-of-type(1) .asset-subheading:first-of-type { font-size: 0; }
+.image-prep-v4 > section.panel:nth-of-type(1) .asset-subheading:first-of-type::before { content: "Base Project Assets"; font-size: 14px; }
+.image-prep-v4 > section.panel:nth-of-type(1) .asset-subheading:first-of-type span { font-size: 11px; }
+
+/* Keep the two Stage 1 cards visually related. */
+.image-prep-v4 > section.panel:nth-of-type(2) { margin-bottom: -8px; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; }
+.image-prep-v4 > section.panel:nth-of-type(1) { border-top-left-radius: 8px; border-top-right-radius: 8px; }
+
+@media (max-width: 1050px) {
+  .image-prep-v4 > section.panel:nth-of-type(2) .tuning-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 700px) {
+  .image-prep-v4 > section.panel:nth-of-type(2) .form-row,
+  .image-prep-v4 > section.panel:nth-of-type(2) .tuning-grid { grid-template-columns: 1fr; }
+}
