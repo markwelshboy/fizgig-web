@@ -3,11 +3,17 @@ import {
   generateCaption,
   getCaptioningOptions,
   getProjectRevision,
+  getProjectRevisionPolicy,
   inspectDataset,
+  updateCaptionValidationPolicy,
+  updateProjectAssetPolicy,
   updateProjectCaption,
   unloadCaptionModels,
+  type AssetTrainingPolicy,
+  type AutoRecaptionPolicy,
   type CaptionGenerateRequest,
   type CaptioningOptions,
+  type ProjectRevisionPolicy,
 } from "../api";
 import { useSession } from "../session";
 
@@ -31,6 +37,11 @@ export function CaptionsPage() {
   const [florenceTask, setFlorenceTask] = useState("<DETAILED_CAPTION>");
   const [maxTokens, setMaxTokens] = useState(120);
   const [addTriggerWord, setAddTriggerWord] = useState(true);
+  const [policy, setPolicy] = useState<ProjectRevisionPolicy | null>(null);
+  const [protectedDraft, setProtectedDraft] = useState("");
+  const [acceptedWordsDraft, setAcceptedWordsDraft] = useState("");
+  const [spellcheckEnabled, setSpellcheckEnabled] = useState(true);
+  const [policySaving, setPolicySaving] = useState(false);
 
   const assets = (revision?.assets ?? []).filter((asset) => asset.included !== false);
   const selectedAsset = assets.find((asset) => asset.filename === selectedName) ?? assets[0];
@@ -40,6 +51,9 @@ export function CaptionsPage() {
   const qwenProvider = options?.providers.find((item) => item.id === "qwen" && "tasks" in item);
   const florenceProvider = options?.providers.find((item) => item.id === "florence" && "models" in item);
   const activeQwenPreset = qwenProvider && "tasks" in qwenProvider ? qwenProvider.tasks[qwenTask] : undefined;
+  const selectedPolicy = selectedAsset
+    ? { training_policy: "automatic" as AssetTrainingPolicy, auto_recaption_policy: "automatic" as AutoRecaptionPolicy, ...(policy?.assets[selectedAsset.filename] ?? {}) }
+    : null;
 
   useEffect(() => {
     getCaptioningOptions().then((result) => {
@@ -55,6 +69,16 @@ export function CaptionsPage() {
   }, []);
 
   useEffect(() => {
+    if (!project || !revision) return;
+    getProjectRevisionPolicy(project.id, revision.id).then((result) => {
+      setPolicy(result);
+      setProtectedDraft(result.caption_validation.protected_phrases.join("\n"));
+      setAcceptedWordsDraft(result.caption_validation.accepted_words.join(", "));
+      setSpellcheckEnabled(result.caption_validation.spellcheck_enabled);
+    }).catch((err) => setMessage(err instanceof Error ? err.message : "Unable to load caption policy"));
+  }, [project?.id, revision?.id]);
+
+  useEffect(() => {
     if (!selectedAsset && assets[0]) { setSelectedName(assets[0].filename); setCaptionDraft(assets[0].caption); }
   }, [assets, selectedAsset]);
 
@@ -63,6 +87,11 @@ export function CaptionsPage() {
     if (!q) return assets;
     return assets.filter((asset) => asset.filename.toLowerCase().includes(q) || asset.caption.toLowerCase().includes(q));
   }, [assets, query]);
+
+  const protectedMatches = useMemo(() => {
+    const haystack = captionDraft.toLowerCase();
+    return (policy?.caption_validation.protected_phrases ?? []).filter((phrase) => phrase && haystack.includes(phrase.toLowerCase()));
+  }, [captionDraft, policy]);
 
   function selectImage(filename: string) {
     const asset = assets.find((item) => item.filename === filename);
@@ -140,18 +169,60 @@ export function CaptionsPage() {
     if (qwenProvider && "tasks" in qwenProvider) { const preset = qwenProvider.tasks[task]; if (preset) { setQwenInstruction(preset.instruction); setMaxTokens(preset.max_tokens); } }
   }
 
+  async function saveValidationPolicy() {
+    if (!project || !revision) return;
+    setPolicySaving(true); setMessage("");
+    try {
+      const protected_phrases = protectedDraft.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+      const accepted_words = acceptedWordsDraft.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+      const next = await updateCaptionValidationPolicy(project.id, revision.id, { protected_phrases, spellcheck_enabled: spellcheckEnabled, accepted_words });
+      setPolicy(next);
+      setMessage("Caption policy saved to project history.");
+    } catch (err) { setMessage(err instanceof Error ? err.message : "Unable to save caption policy"); } finally { setPolicySaving(false); }
+  }
+
+  async function setAssetPolicy(training_policy?: AssetTrainingPolicy, auto_recaption_policy?: AutoRecaptionPolicy) {
+    if (!project || !revision || !selectedAsset) return;
+    setPolicySaving(true); setMessage("");
+    try {
+      const next = await updateProjectAssetPolicy(project.id, revision.id, selectedAsset.filename, { training_policy, auto_recaption_policy });
+      setPolicy(next);
+      setMessage(`${selectedAsset.filename} training policy saved.`);
+    } catch (err) { setMessage(err instanceof Error ? err.message : "Unable to save asset policy"); } finally { setPolicySaving(false); }
+  }
+
   if (!project || !revision || !dataset) return <section className="panel hero-panel stack"><p className="eyebrow">Project required</p><h1>Captions</h1><p className="muted">Open a project and working dataset on the Start page first.</p></section>;
 
   return <div className="stack">
     <header className="page-header"><div><p className="eyebrow">{project.name} · {revision.name}</p><h1>Captions</h1><p className="muted">Only the included Image Prep working set appears here. Project JSON is authoritative; trainer .txt sidecars are generated only when Fizgig needs them.</p></div><div className="actions"><button className="primary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div></header>
+
+    <section className="panel stack">
+      <div><p className="eyebrow">Caption policy</p><div className="card-title">Validation & protected traits</div><p className="muted">Protected phrases are traits you want the LoRA to learn rather than repeatedly name. Fizgig flags them instead of silently deleting them. The trigger word is always exempt from spellcheck.</p></div>
+      <div className="form-row">
+        <label>Protected traits / phrases<textarea value={protectedDraft} onChange={(event) => setProtectedDraft(event.target.value)} placeholder={"blonde hair\nblue eyes"} /><span className="muted">One per line or comma-separated.</span></label>
+        <label>Accepted spellings<input value={acceptedWordsDraft} onChange={(event) => setAcceptedWordsDraft(event.target.value)} placeholder="LoKR, Welsh, product-name" /><span className="muted">Project dictionary for intentional words spellcheck should ignore.</span></label>
+      </div>
+      <div className="actions"><label className="inline-check"><input type="checkbox" checked={spellcheckEnabled} onChange={(event) => setSpellcheckEnabled(event.target.checked)} /> Spellcheck captions</label><button className="secondary" onClick={saveValidationPolicy} disabled={policySaving}>{policySaving ? "Saving…" : "Save caption policy"}</button></div>
+    </section>
+
     <div className="caption-layout">
-      <section className="panel"><div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="thumb-grid caption-grid">{visibleAssets.map((asset) => { const image = dataset.images.find((item) => item.filename === asset.filename); return image ? <button className={`thumb caption-thumb ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} key={asset.filename} onClick={() => selectImage(asset.filename)} title={asset.filename}><img src={image.image_url} alt={asset.filename} />{!asset.caption.trim() && <span className="missing-dot" title="Missing caption" />}</button> : null; })}</div></section>
+      <section className="panel"><div className="toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="thumb-grid caption-grid">{visibleAssets.map((asset) => { const image = dataset.images.find((item) => item.filename === asset.filename); const p = { training_policy: "automatic", auto_recaption_policy: "automatic", ...(policy?.assets[asset.filename] ?? {}) }; return image ? <button className={`thumb caption-thumb ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} key={asset.filename} onClick={() => selectImage(asset.filename)} title={asset.filename}><img src={image.image_url} alt={asset.filename} />{!asset.caption.trim() && <span className="missing-dot" title="Missing caption" />}{p.training_policy === "always_train" && <span className="badge" title="Always Train policy override">Train</span>}</button> : null; })}</div></section>
       <section className="panel stack">{selectedAsset && selectedImage ? <>
         <div><div className="card-title">{selectedAsset.filename}</div><div className="muted">{assets.findIndex((asset) => asset.filename === selectedAsset.filename) + 1} / {assets.length} · canonical project caption</div></div>
         <div className="caption-preview"><img src={selectedImage.image_url} alt={selectedAsset.filename} /></div>
         <label>Caption<textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} /></label>
+        {protectedMatches.length > 0 && <div className="notice error">Protected phrase{protectedMatches.length === 1 ? "" : "s"} present: <strong>{protectedMatches.join(", ")}</strong>. Review before training.</div>}
         {message && <div className={message.includes("failed") || message.includes("requires") || message.includes("not configured") ? "notice error" : "notice success"}>{message}</div>}
         <div className="actions"><button className="secondary" onClick={regenerateSelected} disabled={generating}>{generating ? "Generating…" : "Regenerate with AI"}</button><button className="primary" onClick={onSave} disabled={saving || generating}>{saving ? "Saving…" : "Save Caption"}</button></div>
+
+        <div className="caption-ai-section stack">
+          <div><div className="card-title">Training intervention</div><p className="muted">The loss watcher still reports its real verdict. These controls only change what Fizgig is allowed to do in response.</p></div>
+          <div className="form-row">
+            <label>Training response<select value={selectedPolicy?.training_policy ?? "automatic"} onChange={(event) => setAssetPolicy(event.target.value as AssetTrainingPolicy, undefined)} disabled={policySaving}><option value="automatic">Automatic</option><option value="always_train">Always Train</option></select><span className="muted">Always Train prevents automatic LR throttling, retirement and exclusion; it does not force the analytic verdict to EASY.</span></label>
+            <label>Auto-recaption<select value={selectedPolicy?.auto_recaption_policy ?? "automatic"} onChange={(event) => setAssetPolicy(undefined, event.target.value as AutoRecaptionPolicy)} disabled={policySaving}><option value="automatic">Automatic</option><option value="hold">Hold</option><option value="never">Never</option></select><span className="muted">Hold suppresses automatic rewrites while you experiment manually. Never locks out trainer-initiated rewrites for this policy snapshot.</span></label>
+          </div>
+        </div>
+
         <div className="caption-ai-section stack"><div className="card-title">AI Captioning</div><div className="form-row"><label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value as "qwen" | "florence")}><option value="qwen">Qwen3-VL</option><option value="florence">Florence-2</option></select></label><label>Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label></div>
           {provider === "qwen" ? <><label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /><span className="muted">Hugging Face repo ID or HF-compatible local model directory; independent of the training encoder.</span></label><div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div><label>Caption preset<select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>{qwenProvider && "tasks" in qwenProvider ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>) : <option value="training">Training caption (viewpoint-aware)</option>}</select></label><label>Captioning instruction — editable prompt override<textarea className="instruction-editor" value={qwenInstruction} onChange={(event) => setQwenInstruction(event.target.value)} /></label><div className="prompt-actions"><span className="muted">Every committed AI caption records this model, preset and resolved instruction in project history.</span><button className="secondary" onClick={() => activeQwenPreset && setQwenInstruction(activeQwenPreset.instruction)} disabled={!activeQwenPreset}>Restore preset</button></div></> : <><label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label><label>Florence task<select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select></label></>}
           <label className="inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger word automatically <span className="muted">({triggerWord})</span></label>
