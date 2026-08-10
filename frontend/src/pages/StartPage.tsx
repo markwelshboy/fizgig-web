@@ -7,6 +7,13 @@ const DISMISSED_RECENTS_KEY = "fizgig.dismissedRecentProjects";
 function readDismissedRecents() { try { const value = JSON.parse(localStorage.getItem(DISMISSED_RECENTS_KEY) || "[]"); return new Set<string>(Array.isArray(value) ? value : []); } catch { return new Set<string>(); } }
 function workingDatasetCount(project: ProjectInfo) { return project.dataset_revisions.filter((entry) => entry.model_family !== "generic").length; }
 
+function wildcardMatches(filename: string, pattern: string) {
+  const value = pattern.trim() || "*";
+  const escaped = value.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+  try { return new RegExp(`^${escaped}$`, "i").test(filename); }
+  catch { return filename.toLowerCase().includes(value.toLowerCase()); }
+}
+
 export function StartPage() {
   const navigate = useNavigate();
   const { project, setProject, revision, setRevision, setRun, dataset, setDataset, modelFamily, setModelFamily, triggerWord, setTriggerWord } = useSession();
@@ -16,6 +23,7 @@ export function StartPage() {
   const [sourcePath, setSourcePath] = useState("/workspace/sources/5H1VY");
   const [sourceInfo, setSourceInfo] = useState<DatasetInfo | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [sourceFilter, setSourceFilter] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,16 +32,33 @@ export function StartPage() {
   const duplicateName = projectName.trim() && projects.some((item) => item.name.trim().toLowerCase() === projectName.trim().toLowerCase());
   const selectedImages = sourceInfo?.images.filter((image) => selected.has(image.filename)) ?? [];
   const selectedCaptionCount = selectedImages.filter((image) => image.has_caption).length;
+  const visibleSourceImages = useMemo(() => sourceInfo?.images.filter((image) => wildcardMatches(image.filename, sourceFilter)) ?? [], [sourceInfo, sourceFilter]);
 
   function persistDismissed(next: Set<string>) { setDismissedRecents(next); localStorage.setItem(DISMISSED_RECENTS_KEY, JSON.stringify([...next])); }
   function restoreRecent(projectId: string) { if (!dismissedRecents.has(projectId)) return; const next = new Set(dismissedRecents); next.delete(projectId); persistDismissed(next); }
   function dismissRecent(projectId: string) { const next = new Set(dismissedRecents); next.add(projectId); persistDismissed(next); }
   function clearRecentProjects() { persistDismissed(new Set(projects.map((item) => item.id))); }
 
+  function selectVisible() {
+    setSelected((current) => {
+      const next = new Set(current);
+      visibleSourceImages.forEach((image) => next.add(image.filename));
+      return next;
+    });
+  }
+
+  function deselectVisible() {
+    setSelected((current) => {
+      const next = new Set(current);
+      visibleSourceImages.forEach((image) => next.delete(image.filename));
+      return next;
+    });
+  }
+
   async function inspectSource() {
     setLoading(true); setError("");
-    try { const info = await inspectDataset(sourcePath); setSourceInfo(info); setSelected(new Set(info.images.map((image) => image.filename))); }
-    catch (err) { setSourceInfo(null); setSelected(new Set()); setError(err instanceof Error ? err.message : "Unable to inspect source assets"); }
+    try { const info = await inspectDataset(sourcePath); setSourceInfo(info); setSelected(new Set(info.images.map((image) => image.filename))); setSourceFilter(""); }
+    catch (err) { setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); setError(err instanceof Error ? err.message : "Unable to inspect source assets"); }
     finally { setLoading(false); }
   }
 
@@ -88,10 +113,18 @@ export function StartPage() {
       </section>
       <section className="panel stack project-source-panel">
         <div className="prep-section-heading"><div><div className="card-title">Source Training Assets</div><p className="muted">Golden source material. Fizgig reads from this location but never edits it.</p></div></div>
-        <div className="form-row source-path-row"><label>Source directory<input value={sourcePath} onChange={(e) => { setSourcePath(e.target.value); setSourceInfo(null); setSelected(new Set()); }} /></label><div className="source-actions"><button className="secondary" onClick={inspectSource} disabled={loading}>{loading ? "Loading…" : "Load source assets"}</button><button className="secondary" disabled title="Archive upload is the next source-ingest endpoint">Upload Zip/Tar Archive to Source Directory</button></div></div>
+        <div className="form-row source-path-row"><label>Source directory<input value={sourcePath} onChange={(e) => { setSourcePath(e.target.value); setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); }} /></label><div className="source-actions"><button className="secondary" onClick={inspectSource} disabled={loading}>{loading ? "Loading…" : "Load source assets"}</button><button className="secondary" disabled title="Archive upload is the next source-ingest endpoint">Upload Zip/Tar Archive to Source Directory</button></div></div>
         {sourceInfo && <>
-          <div className="prep-section-heading"><div><strong>Available source assets</strong><span className="muted"> {sourceInfo.image_count}</span></div><div className="actions"><button className="secondary" onClick={() => setSelected(new Set(sourceInfo.images.map((i) => i.filename)))}>Select all</button><button className="secondary" onClick={() => setSelected(new Set())}>Deselect all</button></div></div>
-          <div className="prep-image-grid source-selection-grid">{sourceInfo.images.map((image) => <button type="button" key={image.filename} className={`prep-image-card ${selected.has(image.filename) ? "selected" : "excluded"}`} onClick={() => setSelected((current) => { const next = new Set(current); next.has(image.filename) ? next.delete(image.filename) : next.add(image.filename); return next; })}><div className="prep-thumb-wrap"><img src={image.image_url} alt={image.filename} />{image.has_caption && <span className="caption-badge" title={image.caption}>C</span>}<span className="selection-check">{selected.has(image.filename) ? "✓" : ""}</span></div><strong>{image.filename}</strong></button>)}</div>
+          <div className="source-selection-toolbar">
+            <label className="source-filter-label">Filter filenames
+              <div className="source-filter-shell"><span className={sourceFilter ? "hidden-star" : "filter-star"}>*</span><input value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder="" spellCheck={false} /></div>
+              <small>Wildcards: <code>*john*</code>, <code>portrait_??.png</code>. Empty means <code>*</code>.</small>
+            </label>
+            <div className="source-filter-status"><strong>{visibleSourceImages.length}</strong><span>visible</span><strong>{selected.size}</strong><span>selected of {sourceInfo.image_count}</span></div>
+            <div className="actions source-bulk-actions"><button className="secondary" onClick={selectVisible} disabled={!visibleSourceImages.length}>Select all visible</button><button className="secondary" onClick={deselectVisible} disabled={!visibleSourceImages.length}>Deselect all visible</button></div>
+          </div>
+          <div className="prep-section-heading"><div><strong>Available source assets</strong><span className="muted"> {visibleSourceImages.length}{visibleSourceImages.length !== sourceInfo.image_count ? ` of ${sourceInfo.image_count}` : ""}</span></div></div>
+          {visibleSourceImages.length > 0 ? <div className="source-selection-grid">{visibleSourceImages.map((image) => <button type="button" key={image.filename} className={`prep-image-card source-selection-card ${selected.has(image.filename) ? "selected" : "excluded"}`} onClick={() => setSelected((current) => { const next = new Set(current); next.has(image.filename) ? next.delete(image.filename) : next.add(image.filename); return next; })}><div className="prep-image-wrap source-selection-image"><img src={image.image_url} alt={image.filename} />{image.has_caption && <span className="caption-badge" title={image.caption}>C</span>}<span className="selection-check">{selected.has(image.filename) ? "✓" : ""}</span></div><div className="prep-image-meta"><strong title={image.filename}>{image.filename}</strong></div></button>)}</div> : <div className="notice">No source assets match <strong>{sourceFilter || "*"}</strong>.</div>}
           <div className="summary-ledger source-accounting-ledger">
             <div><span>Selected Project Assets</span><strong>{selected.size}</strong><small>of {sourceInfo.image_count} available source images</small></div>
             <div><span>Associated Captions</span><strong>{selectedCaptionCount}</strong><small>matching captions in selected assets</small></div>
