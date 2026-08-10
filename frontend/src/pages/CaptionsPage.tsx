@@ -26,7 +26,11 @@ export function CaptionsPage() {
   const [query, setQuery] = useState("");
   const [browserOpen, setBrowserOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [advancedAiOpen, setAdvancedAiOpen] = useState(false);
   const [aiCandidate, setAiCandidate] = useState("");
+  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
+  const [presetDraft, setPresetDraft] = useState("");
+  const [presetOriginal, setPresetOriginal] = useState("");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [bulkProgress, setBulkProgress] = useState("");
@@ -60,6 +64,7 @@ export function CaptionsPage() {
     ? { training_policy: "automatic" as AssetTrainingPolicy, auto_recaption_policy: "automatic" as AutoRecaptionPolicy, ...(policy?.assets[selectedAsset.filename] ?? {}) }
     : null;
   const captionChanged = Boolean(selectedAsset && captionDraft !== selectedAsset.caption);
+  const presetChanged = presetDraft !== presetOriginal;
 
   useEffect(() => {
     getCaptioningOptions().then((result) => {
@@ -74,7 +79,10 @@ export function CaptionsPage() {
         const preset = qwen.tasks[qwen.default_task];
         if (preset) { setQwenInstruction(preset.instruction); setMaxTokens(preset.max_tokens); }
       }
-      if (florence && "models" in florence) { setFlorenceModel(florence.default_model); setFlorenceTask(florence.default_task); }
+      if (florence && "models" in florence) {
+        setFlorenceModel(florence.default_model);
+        setFlorenceTask(florence.default_task);
+      }
     }).catch((err) => setMessage(err instanceof Error ? err.message : "Unable to load captioning options"));
   }, []);
 
@@ -98,6 +106,10 @@ export function CaptionsPage() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
+      if (presetEditorOpen) {
+        if (event.key === "Escape") setPresetEditorOpen(false);
+        return;
+      }
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, button, [contenteditable='true']")) return;
       if (event.key === "ArrowLeft") { event.preventDefault(); navigateBy(-1); }
@@ -169,8 +181,29 @@ export function CaptionsPage() {
   }
 
   function generationRequest(): CaptionGenerateRequest {
-    if (provider === "qwen") return { provider, model: qwenModel.trim() || undefined, processor: qwenProcessor.trim() || undefined, revision: qwenRevision.trim() || undefined, task: qwenTask, instruction: qwenInstruction.trim() || undefined, max_tokens: maxTokens, trigger_word: triggerWord, add_trigger_word: addTriggerWord, save: false };
-    return { provider, model: florenceModel, task: florenceTask, max_tokens: maxTokens, trigger_word: triggerWord, add_trigger_word: addTriggerWord, save: false };
+    if (provider === "qwen") {
+      return {
+        provider,
+        model: qwenModel.trim() || undefined,
+        processor: qwenProcessor.trim() || undefined,
+        revision: qwenRevision.trim() || undefined,
+        task: qwenTask,
+        instruction: qwenInstruction.trim() || undefined,
+        max_tokens: maxTokens,
+        trigger_word: triggerWord,
+        add_trigger_word: addTriggerWord,
+        save: false,
+      };
+    }
+    return {
+      provider,
+      model: florenceModel,
+      task: florenceTask,
+      max_tokens: maxTokens,
+      trigger_word: triggerWord,
+      add_trigger_word: addTriggerWord,
+      save: false,
+    };
   }
 
   function captionMetadata() {
@@ -222,7 +255,10 @@ export function CaptionsPage() {
           await saveCanonical(asset.filename, result.caption, "ai_generate_missing", captionMetadata());
           if (asset.filename === selectedAsset?.filename) setCaptionDraft(result.caption);
           completed += 1;
-        } catch (err) { failed += 1; setMessage(err instanceof Error ? err.message : `Failed on ${asset.filename}`); }
+        } catch (err) {
+          failed += 1;
+          setMessage(err instanceof Error ? err.message : `Failed on ${asset.filename}`);
+        }
       }
       await refreshRevision();
       setMessage(`Generate Missing finished: ${completed} committed to project history${failed ? `, ${failed} failed` : ""}.`);
@@ -235,6 +271,22 @@ export function CaptionsPage() {
       const preset = qwenProvider.tasks[task];
       if (preset) { setQwenInstruction(preset.instruction); setMaxTokens(preset.max_tokens); }
     }
+  }
+
+  function openPresetEditor() {
+    if (!activeQwenPreset) return;
+    const resolved = qwenInstruction.trim() || activeQwenPreset.instruction;
+    setPresetOriginal(resolved);
+    setPresetDraft(resolved);
+    setPresetEditorOpen(true);
+  }
+
+  function savePresetEditor() {
+    if (!presetChanged) return;
+    setQwenInstruction(presetDraft);
+    setPresetOriginal(presetDraft);
+    setPresetEditorOpen(false);
+    setMessage("Caption preset override updated for this captioning session.");
   }
 
   async function saveValidationPolicy() {
@@ -311,15 +363,10 @@ export function CaptionsPage() {
 
       <div className="caption-intervention-row">
         <div className="caption-intervention-title">Training Intervention <span className="caption-info" title="The loss watcher keeps its real verdict. These policies only control what Fizgig is allowed to do in response.">i</span></div>
-        <fieldset className="caption-segment-group"><legend>Training Response</legend><div className="caption-segments">
-          <label className={selectedPolicy?.training_policy === "automatic" ? "selected" : ""}><input type="radio" name="training-policy" checked={selectedPolicy?.training_policy === "automatic"} onChange={() => setAssetPolicy("automatic", undefined)} disabled={policySaving} />Automatic</label>
-          <label className={selectedPolicy?.training_policy === "always_train" ? "selected" : ""}><input type="radio" name="training-policy" checked={selectedPolicy?.training_policy === "always_train"} onChange={() => setAssetPolicy("always_train", undefined)} disabled={policySaving} />Always Train</label>
-        </div></fieldset>
-        <fieldset className="caption-segment-group"><legend>Auto-Recaption</legend><div className="caption-segments">
-          <label className={selectedPolicy?.auto_recaption_policy === "automatic" ? "selected" : ""}><input type="radio" name="recaption-policy" checked={selectedPolicy?.auto_recaption_policy === "automatic"} onChange={() => setAssetPolicy(undefined, "automatic")} disabled={policySaving} />Automatic</label>
-          <label className={selectedPolicy?.auto_recaption_policy === "hold" ? "selected" : ""}><input type="radio" name="recaption-policy" checked={selectedPolicy?.auto_recaption_policy === "hold"} onChange={() => setAssetPolicy(undefined, "hold")} disabled={policySaving} />Hold</label>
-          <label className={selectedPolicy?.auto_recaption_policy === "never" ? "selected" : ""}><input type="radio" name="recaption-policy" checked={selectedPolicy?.auto_recaption_policy === "never"} onChange={() => setAssetPolicy(undefined, "never")} disabled={policySaving} />Never</label>
-        </div></fieldset>
+        <div className="caption-intervention-controls">
+          <label title="Always Train prevents automatic LR throttling, retirement and exclusion; it does not force the analytic verdict to EASY.">Training Response<select value={selectedPolicy?.training_policy ?? "automatic"} onChange={(event) => setAssetPolicy(event.target.value as AssetTrainingPolicy, undefined)} disabled={policySaving}><option value="automatic">Automatic</option><option value="always_train">Always Train</option></select></label>
+          <label title="Hold suppresses automatic rewrites while you experiment manually. Never locks out trainer-initiated rewrites for this policy snapshot.">Auto-Recaption<select value={selectedPolicy?.auto_recaption_policy ?? "automatic"} onChange={(event) => setAssetPolicy(undefined, event.target.value as AutoRecaptionPolicy)} disabled={policySaving}><option value="automatic">Automatic</option><option value="hold">Hold</option><option value="never">Never</option></select></label>
+        </div>
       </div>
     </section> : <section className="panel"><p className="muted">No included image selected.</p></section>}
 
@@ -329,26 +376,43 @@ export function CaptionsPage() {
         <span className={`caption-browser-chevron ${aiOpen ? "open" : ""}`}>⌄</span>
       </button>
       {aiOpen && <div className="caption-ai-body stack">
-        <div className="caption-ai-toolbar">
-          <label>Provider<select value={provider} onChange={(event) => setProvider(event.target.value as "qwen" | "florence")}><option value="qwen">Qwen3-VL</option><option value="florence">Florence-2</option></select></label>
-          <label>Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label>
-          <label className="inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord})</span></label>
+        <div className="caption-ai-primary-controls">
+          <label>Captioner<select value={provider} onChange={(event) => { setProvider(event.target.value as "qwen" | "florence"); setAiCandidate(""); }}><option value="qwen">Qwen3-VL</option><option value="florence">Florence-2</option></select></label>
+          <div className="caption-control-field">
+            <span className="caption-control-label">Caption Preset</span>
+            <div className={`caption-preset-control ${provider === "qwen" ? "editable" : ""}`}>
+              {provider === "qwen" ? <select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>{qwenProvider && "tasks" in qwenProvider ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>) : <option value="training">Training caption (viewpoint-aware)</option>}</select> : <select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select>}
+              {provider === "qwen" && <button type="button" className="caption-preset-edit" onClick={openPresetEditor} disabled={!activeQwenPreset}>View/Edit</button>}
+            </div>
+          </div>
+          <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord})</span></label>
         </div>
-        {provider === "qwen" ? <>
-          <label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /></label>
-          <div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div>
-          <label>Caption preset<select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>{qwenProvider && "tasks" in qwenProvider ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>) : <option value="training">Training caption (viewpoint-aware)</option>}</select></label>
-          <label>Captioning instruction — editable preset<textarea className="instruction-editor" value={qwenInstruction} onChange={(event) => setQwenInstruction(event.target.value)} /></label>
-          <div className="prompt-actions"><span className="muted">Candidate generation is transient until you explicitly use or save it.</span><button className="secondary" onClick={() => activeQwenPreset && setQwenInstruction(activeQwenPreset.instruction)} disabled={!activeQwenPreset}>Restore preset</button></div>
-        </> : <>
-          <label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label>
-          <label>Florence task<select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select></label>
-        </>}
-        <div className="caption-ai-actions"><button className="primary" onClick={generateCandidate} disabled={generating}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div>
+
+        <div className="caption-ai-actions caption-ai-actions-primary"><button className="primary" onClick={generateCandidate} disabled={generating}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={() => unloadCaptionModels()} disabled={generating}>Unload AI model</button></div>
+
         <label className="caption-candidate-label">Generated Candidate<textarea value={aiCandidate} onChange={(event) => setAiCandidate(event.target.value)} placeholder="Generate a candidate to compare with the Working Caption above." /></label>
         <div className="caption-candidate-actions"><button className="secondary" disabled={!aiCandidate.trim()} onClick={() => navigator.clipboard?.writeText(aiCandidate)}>Copy Candidate</button><button className="primary" disabled={!aiCandidate.trim()} onClick={() => { setCaptionDraft(aiCandidate); setMessage("AI candidate copied into Working Caption. Save Caption to commit it."); }}>Use as Working Caption</button></div>
+
+        <button className="caption-advanced-toggle" onClick={() => setAdvancedAiOpen((open) => !open)} aria-expanded={advancedAiOpen}><span>Advanced VLM settings</span><span className={`caption-browser-chevron ${advancedAiOpen ? "open" : ""}`}>⌄</span></button>
+        {advancedAiOpen && <div className="caption-advanced-panel stack">
+          <div className="muted">Preferences supplies the normal model defaults. These controls are optional overrides for this captioning session.</div>
+          {provider === "qwen" ? <>
+            <label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /></label>
+            <div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div>
+          </> : <label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label>}
+          <label className="caption-token-field">Max tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label>
+        </div>}
       </div>}
     </section>}
+
+    {presetEditorOpen && activeQwenPreset && <div className="caption-modal-backdrop" onMouseDown={() => setPresetEditorOpen(false)}>
+      <div className="caption-preset-modal" role="dialog" aria-modal="true" aria-labelledby="caption-preset-modal-title" onMouseDown={(event) => event.stopPropagation()}>
+        <div className="caption-preset-modal-heading"><div><p className="eyebrow">Caption preset</p><div className="card-title" id="caption-preset-modal-title">{activeQwenPreset.label}</div></div><button className="caption-modal-close" onClick={() => setPresetEditorOpen(false)} aria-label="Close preset editor">×</button></div>
+        <p className="muted">Edit the instruction passed to Qwen for this preset. Saving updates the active session override; generated-caption provenance records the resolved instruction used.</p>
+        <textarea className="caption-preset-editor" value={presetDraft} onChange={(event) => setPresetDraft(event.target.value)} autoFocus />
+        <div className="caption-preset-modal-actions"><button className="secondary" onClick={() => setPresetDraft(activeQwenPreset.instruction)} disabled={presetDraft === activeQwenPreset.instruction}>Restore built-in</button><span className="caption-modal-spacer" /><button className="secondary" onClick={() => setPresetEditorOpen(false)}>Cancel</button><button className="primary" onClick={savePresetEditor} disabled={!presetChanged}>Save preset</button></div>
+      </div>
+    </div>}
 
     {assets.length > 0 && <section className="panel caption-navigator stack">
       <button className="caption-browser-toggle" onClick={() => setBrowserOpen((open) => !open)} aria-expanded={browserOpen}><span>{browserOpen ? "Hide asset browser" : `Browse all ${assets.length}`}</span><span className={`caption-browser-chevron ${browserOpen ? "open" : ""}`}>⌄</span></button>
