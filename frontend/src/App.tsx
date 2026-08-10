@@ -15,10 +15,10 @@ const nav = [
 
 function Placeholder() {
   return (
-    <section className="panel hero-panel">
-      <p className="eyebrow">Next phase</p>
+    <section className="panel hero-panel stack">
+      <p className="eyebrow">Working dataset</p>
       <h1>Image Prep</h1>
-      <p className="muted">Reserved while we design the richer image-preparation workflow.</p>
+      <p className="muted">This page will build the model-specific scratch dataset: crop/resize to the target model geometry, create derived face crops, make non-destructive image adjustments, and hand the resulting images to Captions. The external project source is never modified.</p>
     </section>
   );
 }
