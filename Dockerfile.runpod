@@ -37,11 +37,16 @@ RUN git clone --filter=blob:none "$FIZGIG_REPO" /opt/Fizgig \
     && git -C /opt/Fizgig checkout --detach FETCH_HEAD \
     && git -C /opt/Fizgig rev-parse HEAD > /opt/Fizgig/.fizgig-web-built-ref
 
+# Keep the heavyweight Fizgig/CUDA environment independent from the browser API
+# requirements. The uv cache retains the large torch/CUDA wheels across builds.
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade pip uv
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install --link-mode=copy --index-strategy unsafe-best-match -r /opt/Fizgig/requirements.txt
+
 COPY backend/requirements.runpod.txt /tmp/requirements.runpod.txt
 RUN --mount=type=cache,target=/root/.cache/pip \
-    python -m pip install --upgrade pip uv \
-    && uv pip install --link-mode=copy --index-strategy unsafe-best-match -r /opt/Fizgig/requirements.txt \
-    && python -m pip install -r /tmp/requirements.runpod.txt \
+    python -m pip install -r /tmp/requirements.runpod.txt \
     && rm -f /tmp/requirements.runpod.txt
 
 # -----------------------------------------------------------------------------
