@@ -10,7 +10,8 @@ Build/output:
   --image <repo/name>  Image repository (default: markwelshboy/fizgig-web)
   --tag <tag>           Image tag (default: caption-test)
   --platform <plats>   Default: linux/amd64
-  --load               Load into local Docker instead of pushing
+  --load               Load into the normal local Docker daemon instead of pushing
+  --load-test          Stream the image directly into the disposable docker-test daemon
   --no-push            Build/cache only; do not push or load
   --no-cache           Disable Docker build cache
   --prune-hard         Prune all cache from the selected Buildx builder first
@@ -19,10 +20,15 @@ Fizgig runtime:
   --fizgig-ref <ref>   Upstream Fizgig branch/tag/commit (default: master)
   --fizgig-repo <url>  Fizgig source repo URL
 
+Environment:
+  DOCKER_TEST_HOST     docker-test daemon endpoint
+                       (default: unix:///run/docker-test/docker.sock)
+
 Examples:
   ./build_fizgig-web.sh
   ./build_fizgig-web.sh --tag test2
-  ./build_fizgig-web.sh --load --tag local-test
+  ./build_fizgig-web.sh --load-test --tag local-test
+  ./build_fizgig-web.sh --load --tag local-production-test
   ./build_fizgig-web.sh --fizgig-ref master --no-push
 EOF
 }
@@ -35,10 +41,12 @@ TAG="caption-test"
 PLATFORM="linux/amd64"
 PUSH=true
 LOAD=false
+LOAD_TEST=false
 NO_CACHE=false
 PRUNE_HARD=false
 FIZGIG_REF="master"
 FIZGIG_REPO="https://github.com/shootthesound/Fizgig.git"
+TEST_DOCKER_HOST="${DOCKER_TEST_HOST:-unix:///run/docker-test/docker.sock}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -46,8 +54,9 @@ while [[ $# -gt 0 ]]; do
     --image) IMAGE="${2:?}"; shift 2 ;;
     --tag) TAG="${2:?}"; shift 2 ;;
     --platform) PLATFORM="${2:?}"; shift 2 ;;
-    --load) LOAD=true; PUSH=false; shift ;;
-    --no-push) PUSH=false; LOAD=false; shift ;;
+    --load) LOAD=true; LOAD_TEST=false; PUSH=false; shift ;;
+    --load-test) LOAD_TEST=true; LOAD=false; PUSH=false; shift ;;
+    --no-push) PUSH=false; LOAD=false; LOAD_TEST=false; shift ;;
     --no-cache) NO_CACHE=true; shift ;;
     --prune-hard) PRUNE_HARD=true; shift ;;
     --fizgig-ref) FIZGIG_REF="${2:?}"; shift 2 ;;
@@ -62,8 +71,13 @@ docker info >/dev/null 2>&1 || die "Docker is not accessible"
 docker buildx inspect "$BUILDER" >/dev/null 2>&1 || die "Buildx builder '$BUILDER' not found"
 [[ -f Dockerfile.runpod ]] || die "Run from the fizgig-web repository root"
 
-if $LOAD && [[ "$PLATFORM" == *,* ]]; then
-  die "--load supports only one platform"
+if [[ "$PLATFORM" == *,* ]] && { $LOAD || $LOAD_TEST; }; then
+  die "--load and --load-test support only one platform"
+fi
+
+if $LOAD_TEST; then
+  docker --host "$TEST_DOCKER_HOST" info >/dev/null 2>&1 \
+    || die "docker-test daemon is not accessible at '$TEST_DOCKER_HOST'"
 fi
 
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -95,15 +109,27 @@ fi
 
 cat <<EOF
 == Fizgig Web Runpod build ==
-Image      : $IMAGE:$TAG
-Builder    : $BUILDER
-Platform   : $PLATFORM
-Push       : $PUSH
-Load       : $LOAD
-Fizgig repo: $FIZGIG_REPO
-Fizgig ref : $FIZGIG_REF
-VCS ref    : $VCS_REF
-Build date : $BUILD_DATE
+Image           : $IMAGE:$TAG
+Builder         : $BUILDER
+Platform        : $PLATFORM
+Push            : $PUSH
+Load normal     : $LOAD
+Load docker-test: $LOAD_TEST
+Test Docker host: $TEST_DOCKER_HOST
+Fizgig repo     : $FIZGIG_REPO
+Fizgig ref      : $FIZGIG_REF
+VCS ref         : $VCS_REF
+Build date      : $BUILD_DATE
 EOF
 
-docker buildx build "${args[@]}" .
+if $LOAD_TEST; then
+  # The Docker exporter writes the image tar to stdout. Stream it straight into
+  # the isolated test daemon so no image layers are imported into /var/lib/docker.
+  docker buildx build "${args[@]}" --output type=docker,dest=- . \
+    | docker --host "$TEST_DOCKER_HOST" load
+
+  docker --host "$TEST_DOCKER_HOST" image inspect "$IMAGE:$TAG" >/dev/null
+  echo "Loaded $IMAGE:$TAG into docker-test ($TEST_DOCKER_HOST)"
+else
+  docker buildx build "${args[@]}" .
+fi
