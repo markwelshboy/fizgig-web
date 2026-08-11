@@ -42,7 +42,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python -m pip install --upgrade pip uv \
     && uv pip install --link-mode=copy --index-strategy unsafe-best-match -r /opt/Fizgig/requirements.txt \
     && python -m pip install -r /tmp/requirements.runpod.txt \
-    && rm -rf /root/.cache /tmp/requirements.runpod.txt
+    && rm -f /tmp/requirements.runpod.txt
 
 # -----------------------------------------------------------------------------
 # Runpod runtime
