@@ -3,6 +3,7 @@ set -euo pipefail
 
 mkdir -p \
   /workspace/projects \
+  /workspace/sources \
   /workspace/datasets \
   /workspace/models/captioning \
   /workspace/fizgig-web \
@@ -23,18 +24,10 @@ else
   GENERATED_PASSWORD=0
 fi
 
-if [[ -n "${PUBLIC_KEY:-}" ]]; then
-  install -d -m 0700 /root/.ssh
-  printf '%s\n' "$PUBLIC_KEY" > /root/.ssh/authorized_keys
-  chmod 0600 /root/.ssh/authorized_keys
-  printf '%s\n' \
-    'PermitRootLogin prohibit-password' \
-    'PasswordAuthentication no' \
-    'PubkeyAuthentication yes' \
-    > /etc/ssh/sshd_config.d/90-fizgig-web.conf
-  /usr/sbin/sshd
-  echo "[fizgig-web] SSH enabled for PUBLIC_KEY"
-fi
+# Runpod may supply a key as SSH_PUBLIC_KEY/PUBLIC_KEY or provision an
+# authorized_keys file directly. The helper supports all three paths and keeps
+# SSH key-only.
+source /usr/local/lib/fizgig-web/setup_ssh.sh
 
 echo "============================================================"
 echo " Fizgig Web GPU runtime"
@@ -43,6 +36,8 @@ echo " vcs:     ${FIZGIG_WEB_VCS_REF:-unknown}"
 echo " Fizgig:  $(cat /opt/Fizgig/.fizgig-web-built-ref 2>/dev/null || git -C /opt/Fizgig rev-parse HEAD 2>/dev/null || echo unknown)"
 echo " web:     port ${FIZGIG_WEB_PORT:-8000}"
 echo " volume:  /workspace"
+echo " sources: /workspace/sources"
+echo " projects:/workspace/projects"
 echo " user:    ${FIZGIG_WEB_USERNAME}"
 if [[ "$GENERATED_PASSWORD" == "1" ]]; then
   echo " password: ${FIZGIG_WEB_PASSWORD}  (generated for this pod process)"
