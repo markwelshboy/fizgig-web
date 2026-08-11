@@ -73,14 +73,11 @@
   opacity: 1;
 }
 
-/* The two visible Project Source ledgers are one conceptual table. Keep their
-   label columns on the same grid line even though the value columns carry
-   different kinds of data. */
-.project-source-panel .project-source-ledger {
-  grid-template-columns: 200px minmax(220px, .8fr) 1fr;
-}
+/* Project Source is one conceptual three-column table. The label, value, and
+   explanatory columns use the same grid tracks in both visible ledgers. */
+.project-source-panel .project-source-ledger,
 .project-source-panel .source-accounting-ledger {
-  grid-template-columns: 200px 110px 1fr;
+  grid-template-columns: 200px minmax(220px, .8fr) 1fr;
 }
 
 /* Plumbing identifiers remain available for provenance/debugging without
