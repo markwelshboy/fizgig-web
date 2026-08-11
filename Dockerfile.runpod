@@ -57,6 +57,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     FIZGIG_ROOT=/opt/Fizgig \
     PYTHONPATH=/opt/Fizgig/src \
     FIZGIG_PROJECTS_ROOT=/workspace/projects \
+    FIZGIG_SOURCES_ROOT=/workspace/sources \
     FIZGIG_WEB_SETTINGS=/workspace/fizgig-web/preferences.json \
     FIZGIG_CAPTION_MODEL_DIR=/workspace/models/captioning \
     FIZGIG_WEB_STATIC_DIR=/opt/fizgig-web/frontend-dist \
@@ -73,14 +74,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
       libgomp1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
       openssh-server \
     && rm -rf /var/lib/apt/lists/* \
-    && mkdir -p /run/sshd /workspace /opt/fizgig-web/backend /opt/fizgig-web/frontend-dist
+    && mkdir -p /run/sshd /workspace /opt/fizgig-web/backend /opt/fizgig-web/frontend-dist /usr/local/lib/fizgig-web
 
 COPY --from=python-builder /opt/venv /opt/venv
 COPY --from=python-builder /opt/Fizgig /opt/Fizgig
 COPY backend/app /opt/fizgig-web/backend/app
 COPY --from=frontend-build /src/frontend/dist /opt/fizgig-web/frontend-dist
+COPY runpod/setup_ssh.sh /usr/local/lib/fizgig-web/setup_ssh.sh
 COPY runpod/start.sh /usr/local/bin/fizgig-web-start
-RUN chmod +x /usr/local/bin/fizgig-web-start
+RUN chmod +x /usr/local/bin/fizgig-web-start /usr/local/lib/fizgig-web/setup_ssh.sh
 
 ARG IMAGE_VERSION=dev
 ARG VCS_REF=unknown
