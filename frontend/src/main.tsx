@@ -12,6 +12,7 @@ import "./exception-editor.css";
 import "./exception-editor-polish.css";
 import "./caption-workbench.css";
 import "./caption-toast.css";
+import "./start-source-layout.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
