@@ -102,6 +102,20 @@ docker compose -f docker-compose.local.yml down
 
 The `.local/` workspace is gitignored, so project/test data is not committed.
 
+## Runpod GPU image
+
+`Dockerfile.runpod` builds a single-service GPU image for real captioning and later trainer integration. React is built to static files and FastAPI serves both the UI and `/api` from port `8000`; `/workspace` holds persistent projects, datasets, model caches and preferences.
+
+The default build helper uses the same `buildkit-scratch` convention as the other pod images:
+
+```bash
+bash build_fizgig-web.sh
+```
+
+That pushes `markwelshboy/fizgig-web:caption-test` by default. The first Runpod template should expose `8000/http`, mount persistent storage at `/workspace`, and set `FIZGIG_WEB_PASSWORD` so the public proxy is protected with browser Basic Auth.
+
+See `docs/RUNPOD_TESTING.md` for the complete build, template, GPU-probe and captioning smoke-test flow.
+
 ## Native development
 
 Backend:
