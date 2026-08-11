@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from .archive_io import import_source_archive, sources_root
 from .captioning import add_trigger, caption_service
 from .model_downloads import model_download_manager
+from .transfer_api import router as transfer_router
 from .project_api import router as project_router
 from .settings import save_settings, settings_dict
 from . import image_prep as image_prep_module
@@ -28,6 +29,7 @@ image_prep_module._crop_box = scalable_crop_box
 image_prep_module._effective_transform = prepared_effective_transform
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
+app.include_router(transfer_router)
 app.include_router(project_router)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".jxl"}
