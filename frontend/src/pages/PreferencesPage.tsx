@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
-import { downloadQwenModel, getPreferences, savePreferences, type Preferences } from "../api";
+import { downloadQwenModel, getModelDownload, getPreferences, savePreferences, type Preferences } from "../api";
 
 const DEFAULTS: Preferences = {
   qwen_caption_model: "Qwen/Qwen3-VL-8B-Instruct",
   qwen_caption_processor: "",
   qwen_caption_revision: "",
-  caption_model_dir: "/workspace/Fizgig/models/captioning",
+  caption_model_dir: "/workspace/models/captioning",
 };
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
 
 export function PreferencesPage() {
   const [prefs, setPrefs] = useState<Preferences>(DEFAULTS);
@@ -41,17 +45,24 @@ export function PreferencesPage() {
 
   async function onDownload() {
     setBusy(true);
-    setMessage(`Downloading ${downloadRepo}… this may take several minutes.`);
+    setMessage(`Queueing ${downloadRepo}…`);
     try {
-      const result = await downloadQwenModel({
+      let job = await downloadQwenModel({
         repo_id: downloadRepo,
         revision: downloadRevision,
         model_dir: prefs.caption_model_dir,
         use_as_qwen_caption_model: true,
       });
+      setMessage(`Downloading ${job.repo_id}…`);
+      while (job.status === "queued" || job.status === "running") {
+        await wait(1500);
+        job = await getModelDownload(job.id);
+        setMessage(job.phase === "selecting" ? `Selecting downloaded ${job.repo_id}…` : `Downloading ${job.repo_id}…`);
+      }
+      if (job.status === "failed") throw new Error(job.error || "Model download failed");
       const updated = await getPreferences();
       setPrefs(updated);
-      setMessage(`Downloaded and selected ${result.repo_id}: ${result.path}`);
+      setMessage(`Downloaded and selected ${job.repo_id}: ${job.path}`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "Model download failed");
     } finally {
@@ -102,7 +113,7 @@ export function PreferencesPage() {
         <section className="panel stack">
           <div>
             <div className="card-title">Download Caption Model</div>
-            <p className="muted">Download a Hub checkpoint into persistent storage and make that local copy the default caption VLM.</p>
+            <p className="muted">Start a background Hub download into workspace storage. The browser polls status, so a large checkpoint does not depend on one long-lived HTTP request.</p>
           </div>
           <label>Hugging Face repository
             <input value={downloadRepo} onChange={(event) => setDownloadRepo(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct" />
