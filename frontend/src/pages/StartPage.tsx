@@ -162,10 +162,15 @@ export function StartPage() {
         <div className="summary-ledger project-source-ledger">
           <div><span>Project ID</span><strong>{project.id}</strong><small>immutable provenance key</small></div>
           <div><span>Source Training Assets</span><strong>{project.external_source.path}</strong><small>golden source · read-only to Fizgig</small></div>
-          <div><span>Project Import Snapshot</span><strong>{project.current_import}</strong><small>{project.imports.find((i) => i.id === project.current_import)?.image_count ?? importedImageCount} selected project assets</small></div>
-          <div><span>Working Project State</span><strong>{revision?.id ?? "Initial"}</strong><small>{revision?.name ?? "training direction not yet selected"}</small></div>
         </div>
         {dataset && <div className="summary-ledger source-accounting-ledger"><div><span>Project Images</span><strong>{importedImageCount}</strong><small>selected from golden source</small></div><div><span>Associated Captions</span><strong>{importedCaptionCount}</strong><small>matching imported captions</small></div><div><span>Images Requiring Captioning</span><strong>{needCaptionCount}</strong><small>no associated caption</small></div></div>}
+        <details className="project-technical-details">
+          <summary>Technical project details</summary>
+          <div className="summary-ledger project-technical-ledger">
+            <div><span>Import snapshot</span><strong>{project.current_import}</strong><small>{project.imports.find((i) => i.id === project.current_import)?.image_count ?? importedImageCount} selected project assets</small></div>
+            <div><span>Working dataset revision</span><strong>{revision?.id ?? "Initial"}</strong><small>{revision?.name ?? "training direction not yet selected"}</small></div>
+          </div>
+        </details>
         <div className="notice success">Source assets remain untouched. From here onward Fizgig works with project-owned assets and records their provenance.</div>
       </section>
       <section className="panel stack">
