@@ -10,7 +10,7 @@
   color: inherit;
   font-size: 12px;
 }
-.source-path-block > input {
+.source-path-block > input:not(.visually-hidden-file) {
   grid-column: 1;
   min-width: 0;
 }
@@ -21,6 +21,21 @@
 .source-path-block > .source-load-button {
   grid-column: 1;
   justify-self: start;
+}
+.visually-hidden-file {
+  display: none !important;
+}
+.archive-download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.archive-download-link:hover {
+  border-color: #516b91;
+  background: #16243a;
 }
 
 /* The generic image-prep polish currently paints an expand glyph on every
@@ -101,7 +116,7 @@
     grid-template-columns: 1fr;
   }
   .source-path-block > .source-directory-label,
-  .source-path-block > input,
+  .source-path-block > input:not(.visually-hidden-file),
   .source-path-block > .source-upload-button,
   .source-path-block > .source-load-button {
     grid-column: 1;
