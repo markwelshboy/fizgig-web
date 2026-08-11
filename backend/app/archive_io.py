@@ -39,7 +39,7 @@ def _safe_member_parts(name: str) -> tuple[str, ...]:
         raise ValueError(f"Unsafe archive path: {name}")
     if path.parts and ":" in path.parts[0]:
         raise ValueError(f"Unsafe archive path: {name}")
-    return tuple(part for part in path.parts if part not in {"."})
+    return tuple(part for part in path.parts if part != ".")
 
 
 def _check_limits(file_count: int, byte_count: int) -> None:
@@ -145,7 +145,10 @@ def _payload_root(extracted: Path) -> Path:
 
 def import_source_archive(source: BinaryIO, filename: str, destination: str) -> dict[str, Any]:
     target = resolve_source_destination(destination)
-    if target.exists() and any(target.iterdir()):
+    existed = target.exists()
+    if existed and not target.is_dir():
+        raise FileExistsError(f"Source destination is not a directory: {target}")
+    if existed and any(target.iterdir()):
         raise FileExistsError(f"Source destination is not empty: {target}")
 
     root = sources_root()
@@ -156,8 +159,8 @@ def import_source_archive(source: BinaryIO, filename: str, destination: str) -> 
         for item in list(payload.iterdir()):
             shutil.move(str(item), str(target / item.name))
     except Exception:
-        if target.exists() and not any(target.iterdir()):
-            target.rmdir()
+        if not existed and target.exists():
+            shutil.rmtree(target, ignore_errors=True)
         raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
@@ -171,21 +174,6 @@ def import_source_archive(source: BinaryIO, filename: str, destination: str) -> 
         "image_count": len(images),
         "caption_count": len(captions),
     }
-
-
-def create_project_archive(project_dir: Path, project_id: str) -> Path:
-    exports = project_dir.parent / ".exports"
-    exports.mkdir(parents=True, exist_ok=True)
-    fd, raw_path = tempfile.mkstemp(prefix=f"fizgig-project-{project_id}-", suffix=".tar.gz", dir=str(exports))
-    os.close(fd)
-    archive = Path(raw_path)
-    try:
-        with tarfile.open(archive, mode="w:gz", dereference=True) as tf:
-            tf.add(project_dir, arcname=project_id, recursive=True)
-        return archive
-    except Exception:
-        archive.unlink(missing_ok=True)
-        raise
 
 
 def _read_project_meta(project_dir: Path) -> dict[str, Any]:
@@ -265,6 +253,8 @@ def import_project_archive(source: BinaryIO, filename: str, projects_root: Path)
     projects_root = projects_root.resolve()
     projects_root.mkdir(parents=True, exist_ok=True)
     work, _ = _extract_archive(source, filename, projects_root)
+    destination: Path | None = None
+    moved = False
     try:
         extracted = work / "extracted"
         direct = extracted if (extracted / "project.json").is_file() else None
@@ -281,7 +271,12 @@ def import_project_archive(source: BinaryIO, filename: str, projects_root: Path)
             raise FileExistsError(f"Project already exists: {project_id}")
         old_root = _old_project_root(meta)
         shutil.move(str(payload), str(destination))
+        moved = True
         _rebase_project_json(destination, old_root)
-        return json.loads((destination / "project.json").read_text(encoding="utf-8"))
+        return _read_project_meta(destination)
+    except Exception:
+        if moved and destination is not None and destination.exists():
+            shutil.rmtree(destination, ignore_errors=True)
+        raise
     finally:
         shutil.rmtree(work, ignore_errors=True)
