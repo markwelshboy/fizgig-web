@@ -58,6 +58,44 @@
   opacity: 1;
 }
 
+/* The two visible Project Source ledgers are one conceptual table. Keep their
+   label columns on the same grid line even though the value columns carry
+   different kinds of data. */
+.project-source-panel .project-source-ledger {
+  grid-template-columns: 200px minmax(220px, .8fr) 1fr;
+}
+.project-source-panel .source-accounting-ledger {
+  grid-template-columns: 200px 110px 1fr;
+}
+
+/* Plumbing identifiers remain available for provenance/debugging without
+   competing with the user-facing project summary. */
+.project-technical-details {
+  margin-top: 2px;
+  border-top: 1px solid #24354d;
+  padding-top: 8px;
+}
+.project-technical-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #8194ad;
+  font-size: 11px;
+  user-select: none;
+}
+.project-technical-details summary:hover {
+  color: #c7d3e8;
+}
+.project-technical-ledger {
+  grid-template-columns: 200px minmax(220px, .8fr) 1fr;
+  margin-top: 6px;
+}
+.project-technical-ledger span,
+.project-technical-ledger strong,
+.project-technical-ledger small {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
 @media (max-width: 700px) {
   .source-path-block {
     grid-template-columns: 1fr;
@@ -71,5 +109,11 @@
   .source-path-block > .source-upload-button,
   .source-path-block > .source-load-button {
     justify-self: stretch;
+  }
+
+  .project-source-panel .project-source-ledger,
+  .project-source-panel .source-accounting-ledger,
+  .project-technical-ledger {
+    grid-template-columns: 1fr;
   }
 }
