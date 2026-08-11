@@ -121,13 +121,14 @@
   line-height: 1.45;
 }
 
-/* Expand is a real affordance, not a decorative pseudo-element. React renders
-   it only when a square cover thumbnail is actually hiding part of the image. */
-.prep-image-wrap,
-#per-image-v4 .fixed-review-card {
+/* React marks square cover thumbnails as can-expand only when the loaded image
+   is materially non-square. The marker is therefore tied to real hidden image
+   area instead of being painted onto every card. */
+.prep-image-wrap {
   position: relative;
 }
-.prep-expand-affordance {
+.prep-image-wrap.can-expand::after {
+  content: "↗↙";
   position: absolute;
   left: 7px;
   bottom: 7px;
@@ -149,7 +150,7 @@
   opacity: .8;
   pointer-events: none;
 }
-.prep-image-card:hover .prep-expand-affordance {
+.prep-image-card:hover .prep-image-wrap.can-expand::after {
   opacity: 1;
 }
 
