@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gc
 import os
+import random
 import sys
 import threading
 from pathlib import Path
@@ -102,6 +103,50 @@ def add_trigger(caption: str, trigger_word: str) -> str:
     if caption.lower().startswith(trigger_word.lower()):
         return caption
     return f"{trigger_word}, {caption}" if caption else trigger_word
+
+
+def _clean_qwen_caption(value: str) -> str:
+    """Normalize whitespace and remove common image-description preambles."""
+    text = " ".join(value.strip().split())
+    for _ in range(3):
+        lower = text.lower()
+        matched = False
+        for prefix in (
+            "this image shows ",
+            "this image depicts ",
+            "this image features ",
+            "the image shows ",
+            "the image depicts ",
+            "the photo shows ",
+            "the photograph shows ",
+            "in this image, ",
+            "in this photo, ",
+            "in the image, ",
+            "we see ",
+            "here we see ",
+        ):
+            if lower.startswith(prefix):
+                text = text[len(prefix):].lstrip(" ,:-")
+                matched = True
+                break
+        if not matched:
+            break
+    return text
+
+
+def _cap_qwen_image(image, megapixels: float = 1.0):
+    from PIL import Image
+
+    image = image.convert("RGB")
+    cap = int(megapixels * 1024 * 1024)
+    width, height = image.size
+    if width > 0 and height > 0 and width * height > cap:
+        scale = (cap / (width * height)) ** 0.5
+        image = image.resize(
+            (max(1, round(width * scale)), max(1, round(height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+    return image
 
 
 def download_qwen_snapshot(repo_id: str, *, revision: str = "", model_dir: str = "") -> str:
@@ -219,7 +264,7 @@ class CaptionService:
         try:
             import torch
             from PIL import Image
-            from transformers import AutoModelForImageTextToText, AutoProcessor
+            from transformers import AutoProcessor, Qwen3VLForConditionalGeneration
         except Exception as exc:
             raise RuntimeError(
                 "Qwen3-VL captioning requires torch, Pillow and a Transformers version with Qwen3-VL support"
@@ -238,7 +283,7 @@ class CaptionService:
                 processor_source,
                 revision=revision or None,
             )
-            self._qwen_model = AutoModelForImageTextToText.from_pretrained(
+            self._qwen_model = Qwen3VLForConditionalGeneration.from_pretrained(
                 model_source,
                 **model_kwargs,
             ).eval()
@@ -251,21 +296,24 @@ class CaptionService:
         resolved_instruction = (instruction or "").strip() or str(preset["instruction"])
         resolved_tokens = max_tokens or int(preset["max_tokens"])
 
-        image = Image.open(image_path).convert("RGB")
+        image = _cap_qwen_image(Image.open(image_path), 1.0)
         messages = [
             {
                 "role": "user",
                 "content": [
-                    {"type": "image", "image": image},
+                    {"type": "image"},
                     {"type": "text", "text": resolved_instruction},
                 ],
             }
         ]
-        inputs = self._qwen_processor.apply_chat_template(
+        prompt = self._qwen_processor.apply_chat_template(
             messages,
-            tokenize=True,
             add_generation_prompt=True,
-            return_dict=True,
+            tokenize=False,
+        )
+        inputs = self._qwen_processor(
+            text=[prompt],
+            images=[image],
             return_tensors="pt",
         )
         inputs.pop("token_type_ids", None)
@@ -273,14 +321,30 @@ class CaptionService:
         if device is not None:
             inputs = inputs.to(device)
 
-        generated = self._qwen_model.generate(**inputs, max_new_tokens=resolved_tokens, do_sample=False)
-        trimmed = [out[len(inp):] for inp, out in zip(inputs.input_ids, generated)]
+        cpu_state = torch.random.get_rng_state()
+        cuda_states = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None
+        try:
+            torch.manual_seed(random.randint(1, 2**31 - 1))
+            with torch.no_grad():
+                generated = self._qwen_model.generate(
+                    **inputs,
+                    max_new_tokens=resolved_tokens,
+                    do_sample=True,
+                    temperature=0.5,
+                    top_p=0.9,
+                )
+        finally:
+            torch.random.set_rng_state(cpu_state)
+            if cuda_states is not None:
+                torch.cuda.set_rng_state_all(cuda_states)
+
+        prompt_length = inputs["input_ids"].shape[1]
         decoded = self._qwen_processor.batch_decode(
-            trimmed,
+            generated[:, prompt_length:],
             skip_special_tokens=True,
             clean_up_tokenization_spaces=False,
         )
-        return str(decoded[0]).strip()
+        return _clean_qwen_caption(str(decoded[0]))
 
     def _generate_florence(self, image_path: Path, *, model: str, task: str, max_tokens: int) -> str:
         if model not in FLORENCE_MODELS:
