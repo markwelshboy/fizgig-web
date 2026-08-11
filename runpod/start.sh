@@ -26,8 +26,10 @@ fi
 
 # Runpod may supply a key as SSH_PUBLIC_KEY/PUBLIC_KEY or provision an
 # authorized_keys file directly. The helper supports all three paths and keeps
-# SSH key-only.
-source /usr/local/lib/fizgig-web/setup_ssh.sh
+# SSH key-only. A broken SSH setup should not take down the browser service.
+if ! source /usr/local/lib/fizgig-web/setup_ssh.sh; then
+  echo "[ssh] WARNING: SSH bootstrap failed; Fizgig Web will continue without sshd." >&2
+fi
 
 echo "============================================================"
 echo " Fizgig Web GPU runtime"
