@@ -121,17 +121,15 @@
   line-height: 1.45;
 }
 
-/* Review thumbnails can switch from cover to contain on hover. Make that
-   discoverable with a small diagonal-expand affordance in the image corner. */
+/* Expand is a real affordance, not a decorative pseudo-element. React renders
+   it only when a square cover thumbnail is actually hiding part of the image. */
 .prep-image-wrap,
 #per-image-v4 .fixed-review-card {
   position: relative;
 }
-.prep-image-wrap::after,
-#per-image-v4 .fixed-review-card::after {
-  content: "↗↙";
+.prep-expand-affordance {
   position: absolute;
-  right: 7px;
+  left: 7px;
   bottom: 7px;
   z-index: 4;
   display: grid;
@@ -151,8 +149,7 @@
   opacity: .8;
   pointer-events: none;
 }
-.prep-image-card:hover .prep-image-wrap::after,
-.processed-card:hover .fixed-review-card::after {
+.prep-image-card:hover .prep-expand-affordance {
   opacity: 1;
 }
 
