@@ -1,0 +1,98 @@
+# syntax=docker/dockerfile:1.7
+
+# -----------------------------------------------------------------------------
+# Browser build
+# -----------------------------------------------------------------------------
+FROM node:22-alpine AS frontend-build
+
+WORKDIR /src/frontend
+COPY frontend/package.json ./package.json
+RUN npm install
+COPY frontend/ ./
+RUN npm run build
+
+# -----------------------------------------------------------------------------
+# GPU Python environment builder
+# -----------------------------------------------------------------------------
+FROM ubuntu:22.04 AS python-builder
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    VIRTUAL_ENV=/opt/venv
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-dev \
+      build-essential git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv "$VIRTUAL_ENV"
+ENV PATH="$VIRTUAL_ENV/bin:$PATH"
+
+ARG FIZGIG_REPO=https://github.com/shootthesound/Fizgig.git
+ARG FIZGIG_REF=master
+RUN git clone --filter=blob:none "$FIZGIG_REPO" /opt/Fizgig \
+    && git -C /opt/Fizgig fetch --depth 1 origin "$FIZGIG_REF" \
+    && git -C /opt/Fizgig checkout --detach FETCH_HEAD \
+    && git -C /opt/Fizgig rev-parse HEAD > /opt/Fizgig/.fizgig-web-built-ref
+
+COPY backend/requirements.runpod.txt /tmp/requirements.runpod.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install --upgrade pip uv \
+    && uv pip install --link-mode=copy --index-strategy unsafe-best-match -r /opt/Fizgig/requirements.txt \
+    && python -m pip install -r /tmp/requirements.runpod.txt \
+    && rm -rf /root/.cache /tmp/requirements.runpod.txt
+
+# -----------------------------------------------------------------------------
+# Runpod runtime
+# -----------------------------------------------------------------------------
+FROM ubuntu:22.04 AS final
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    VIRTUAL_ENV=/opt/venv \
+    PATH=/opt/venv/bin:$PATH \
+    FIZGIG_ROOT=/opt/Fizgig \
+    PYTHONPATH=/opt/Fizgig/src \
+    FIZGIG_PROJECTS_ROOT=/workspace/projects \
+    FIZGIG_WEB_SETTINGS=/workspace/fizgig-web/preferences.json \
+    FIZGIG_CAPTION_MODEL_DIR=/workspace/models/captioning \
+    FIZGIG_WEB_STATIC_DIR=/opt/fizgig-web/frontend-dist \
+    HF_HOME=/workspace/.cache/huggingface \
+    INSIGHTFACE_HOME=/workspace/.insightface \
+    XDG_CACHE_HOME=/workspace/.cache \
+    FIZGIG_WEB_PORT=8000
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-venv python3-dev \
+      git curl ca-certificates \
+      gcc libc6-dev \
+      libgomp1 libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 \
+      openssh-server \
+    && rm -rf /var/lib/apt/lists/* \
+    && mkdir -p /run/sshd /workspace /opt/fizgig-web/backend /opt/fizgig-web/frontend-dist
+
+COPY --from=python-builder /opt/venv /opt/venv
+COPY --from=python-builder /opt/Fizgig /opt/Fizgig
+COPY backend/app /opt/fizgig-web/backend/app
+COPY --from=frontend-build /src/frontend/dist /opt/fizgig-web/frontend-dist
+COPY runpod/start.sh /usr/local/bin/fizgig-web-start
+RUN chmod +x /usr/local/bin/fizgig-web-start
+
+ARG IMAGE_VERSION=dev
+ARG VCS_REF=unknown
+ARG BUILD_DATE=unknown
+ENV FIZGIG_WEB_IMAGE_VERSION=$IMAGE_VERSION \
+    FIZGIG_WEB_VCS_REF=$VCS_REF \
+    FIZGIG_WEB_BUILD_DATE=$BUILD_DATE
+
+WORKDIR /workspace
+EXPOSE 8000 22
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:${FIZGIG_WEB_PORT}/api/health >/dev/null || exit 1
+
+ENTRYPOINT ["/usr/local/bin/fizgig-web-start"]
