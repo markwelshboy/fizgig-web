@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 DEFAULT_QWEN_CAPTION_MODEL = "Qwen/Qwen3-VL-8B-Instruct"
-DEFAULT_CAPTION_MODEL_DIR = "/workspace/Fizgig/models/captioning"
+DEFAULT_CAPTION_MODEL_DIR = "/workspace/models/captioning"
 
 
 @dataclass
