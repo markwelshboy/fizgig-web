@@ -7,6 +7,14 @@ from collections.abc import Iterator
 from pathlib import Path
 
 
+def _portable_member(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+    # Project archives should contain project-owned files only. Never follow or
+    # preserve a symlink that could point at a model/cache outside the project.
+    if info.issym() or info.islnk():
+        return None
+    return info
+
+
 def stream_project_archive(project_dir: Path, project_id: str) -> Iterator[bytes]:
     """Produce a gzip tar stream with pipe backpressure and no temporary archive."""
     read_fd, write_fd = os.pipe()
@@ -15,8 +23,8 @@ def stream_project_archive(project_dir: Path, project_id: str) -> Iterator[bytes
     def produce() -> None:
         try:
             with os.fdopen(write_fd, "wb", buffering=0) as output:
-                with tarfile.open(fileobj=output, mode="w|gz", dereference=True) as tf:
-                    tf.add(project_dir, arcname=project_id, recursive=True)
+                with tarfile.open(fileobj=output, mode="w|gz", dereference=False) as tf:
+                    tf.add(project_dir, arcname=project_id, recursive=True, filter=_portable_member)
         except BrokenPipeError:
             # Normal when the browser cancels a download.
             pass
