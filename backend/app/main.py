@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import base64
 import hashlib
+import hmac
+import os
+import platform
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -26,6 +30,39 @@ app.include_router(project_router)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".jxl"}
 _DATASETS: dict[str, Path] = {}
+
+
+@app.middleware("http")
+async def optional_basic_auth(request: Request, call_next):
+    """Protect a public pod proxy when FIZGIG_WEB_PASSWORD is configured.
+
+    Runpod's HTTP proxy is public. Basic auth keeps the single-service pod usable
+    from an ordinary browser without requiring a separate login UI. Local dev is
+    unchanged because no password is configured by docker-compose.local.yml.
+    """
+    password = os.environ.get("FIZGIG_WEB_PASSWORD", "")
+    if not password or request.url.path == "/api/health":
+        return await call_next(request)
+
+    username = os.environ.get("FIZGIG_WEB_USERNAME", "fizgig")
+    authorization = request.headers.get("authorization", "")
+    supplied_user = ""
+    supplied_password = ""
+    if authorization.startswith("Basic "):
+        try:
+            decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
+            supplied_user, supplied_password = decoded.split(":", 1)
+        except (ValueError, UnicodeDecodeError):
+            pass
+
+    if hmac.compare_digest(supplied_user, username) and hmac.compare_digest(supplied_password, password):
+        return await call_next(request)
+
+    return Response(
+        status_code=401,
+        headers={"WWW-Authenticate": 'Basic realm="Fizgig Web"'},
+        content="Authentication required",
+    )
 
 
 class DatasetRequest(BaseModel):
@@ -102,6 +139,31 @@ def _image_record(dataset_id: str, image: Path) -> dict[str, object]:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/api/runtime")
+def runtime_status() -> dict[str, object]:
+    """Small deployment probe for GPU pods before a model is loaded."""
+    result: dict[str, object] = {
+        "python": platform.python_version(),
+        "workspace": str(Path("/workspace").resolve()),
+        "fizgig_root": os.environ.get("FIZGIG_ROOT", ""),
+        "static_dir": os.environ.get("FIZGIG_WEB_STATIC_DIR", ""),
+    }
+    try:
+        import torch
+
+        cuda_available = bool(torch.cuda.is_available())
+        result.update({
+            "torch": torch.__version__,
+            "torch_cuda": torch.version.cuda,
+            "cuda_available": cuda_available,
+            "cuda_device_count": torch.cuda.device_count() if cuda_available else 0,
+            "cuda_device": torch.cuda.get_device_name(0) if cuda_available else None,
+        })
+    except Exception as exc:
+        result.update({"cuda_available": False, "torch_error": f"{type(exc).__name__}: {exc}"})
+    return result
 
 
 @app.get("/api/model-families")
@@ -232,3 +294,21 @@ def generate_caption(dataset_id: str, filename: str, request: CaptionGenerateReq
         caption = _write_caption(image, caption)
 
     return {"filename": image.name, "caption": caption, "saved": request.save, "provider": request.provider}
+
+
+# In the Runpod image the Vite build is copied into FIZGIG_WEB_STATIC_DIR and
+# FastAPI becomes the single origin for both UI and API. Local development does
+# not set this variable, so Vite continues to serve the UI and proxy /api.
+_static_raw = os.environ.get("FIZGIG_WEB_STATIC_DIR", "").strip()
+if _static_raw:
+    _static_root = Path(_static_raw).expanduser().resolve()
+    _index = _static_root / "index.html"
+    if _index.is_file():
+        @app.get("/{web_path:path}", include_in_schema=False)
+        def serve_web_app(web_path: str) -> FileResponse:
+            if web_path.startswith("api/"):
+                raise HTTPException(status_code=404, detail="API route not found")
+            candidate = (_static_root / web_path).resolve()
+            if candidate.is_file() and candidate.is_relative_to(_static_root):
+                return FileResponse(candidate)
+            return FileResponse(_index)
