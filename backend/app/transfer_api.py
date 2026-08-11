@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
-from starlette.background import BackgroundTask
+from fastapi.responses import StreamingResponse
 
-from .archive_io import create_project_archive, import_project_archive
+from .archive_io import import_project_archive
+from .project_export import stream_project_archive
 from .projects import project_store
 
 router = APIRouter(prefix="/api", tags=["transfers"])
@@ -25,18 +25,15 @@ def import_project(archive: UploadFile = File(...)):
 
 
 @router.get("/projects/{project_id}/export")
-def export_project(project_id: str) -> FileResponse:
+def export_project(project_id: str) -> StreamingResponse:
     try:
         project_dir = project_store.project_dir(project_id)
-        archive = create_project_archive(project_dir, project_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Project export failed: {exc}") from exc
 
-    return FileResponse(
-        archive,
+    filename = f"fizgig-project-{project_id}.tar.gz"
+    return StreamingResponse(
+        stream_project_archive(project_dir, project_id),
         media_type="application/gzip",
-        filename=f"fizgig-project-{project_id}.tar.gz",
-        background=BackgroundTask(archive.unlink, missing_ok=True),
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
