@@ -1,0 +1,75 @@
+/* Start-page source controls: keep the path and archive action together, with load beneath. */
+.source-path-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  align-items: end;
+}
+.source-path-block > .source-directory-label {
+  grid-column: 1 / -1;
+  color: inherit;
+  font-size: 12px;
+}
+.source-path-block > input {
+  grid-column: 1;
+  min-width: 0;
+}
+.source-path-block > .source-upload-button {
+  grid-column: 2;
+  white-space: nowrap;
+}
+.source-path-block > .source-load-button {
+  grid-column: 1;
+  justify-self: start;
+}
+
+/* The generic image-prep polish currently paints an expand glyph on every
+   prep-image-wrap. Source selection can determine this correctly from the
+   image's intrinsic dimensions, so suppress the generic marker here and only
+   show it when React marks the square cover thumbnail as genuinely cropped. */
+.source-selection-image::after {
+  display: none !important;
+}
+.source-selection-image.can-expand::after {
+  content: "↗↙";
+  position: absolute;
+  left: 7px;
+  right: auto;
+  bottom: 7px;
+  z-index: 4;
+  display: grid !important;
+  place-items: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid rgba(190, 154, 255, .75);
+  border-radius: 7px;
+  background: rgba(76, 29, 149, .88);
+  color: #efe6ff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+  opacity: .8;
+  pointer-events: none;
+}
+.source-selection-card:hover .source-selection-image.can-expand::after {
+  opacity: 1;
+}
+
+@media (max-width: 700px) {
+  .source-path-block {
+    grid-template-columns: 1fr;
+  }
+  .source-path-block > .source-directory-label,
+  .source-path-block > input,
+  .source-path-block > .source-upload-button,
+  .source-path-block > .source-load-button {
+    grid-column: 1;
+  }
+  .source-path-block > .source-upload-button,
+  .source-path-block > .source-load-button {
+    justify-self: stretch;
+  }
+}
