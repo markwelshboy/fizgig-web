@@ -24,6 +24,7 @@ export function StartPage() {
   const [sourceInfo, setSourceInfo] = useState<DatasetInfo | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [sourceFilter, setSourceFilter] = useState("");
+  const [expandableSourceImages, setExpandableSourceImages] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -38,6 +39,17 @@ export function StartPage() {
   function restoreRecent(projectId: string) { if (!dismissedRecents.has(projectId)) return; const next = new Set(dismissedRecents); next.delete(projectId); persistDismissed(next); }
   function dismissRecent(projectId: string) { const next = new Set(dismissedRecents); next.add(projectId); persistDismissed(next); }
   function clearRecentProjects() { persistDismissed(new Set(projects.map((item) => item.id))); }
+
+  function rememberSourceAspect(filename: string, width: number, height: number) {
+    const ratio = width / Math.max(1, height);
+    const canExpand = Math.abs(ratio - 1) > 0.03;
+    setExpandableSourceImages((current) => {
+      if (current.has(filename) === canExpand) return current;
+      const next = new Set(current);
+      if (canExpand) next.add(filename); else next.delete(filename);
+      return next;
+    });
+  }
 
   function selectVisible() {
     setSelected((current) => {
@@ -57,8 +69,8 @@ export function StartPage() {
 
   async function inspectSource() {
     setLoading(true); setError("");
-    try { const info = await inspectDataset(sourcePath); setSourceInfo(info); setSelected(new Set(info.images.map((image) => image.filename))); setSourceFilter(""); }
-    catch (err) { setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); setError(err instanceof Error ? err.message : "Unable to inspect source assets"); }
+    try { const info = await inspectDataset(sourcePath); setSourceInfo(info); setSelected(new Set(info.images.map((image) => image.filename))); setSourceFilter(""); setExpandableSourceImages(new Set()); }
+    catch (err) { setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); setExpandableSourceImages(new Set()); setError(err instanceof Error ? err.message : "Unable to inspect source assets"); }
     finally { setLoading(false); }
   }
 
@@ -113,7 +125,12 @@ export function StartPage() {
       </section>
       <section className="panel stack project-source-panel">
         <div className="prep-section-heading"><div><div className="card-title">Source Training Assets</div><p className="muted">Golden source material. Fizgig reads from this location but never edits it.</p></div></div>
-        <div className="form-row source-path-row"><label>Source directory<input value={sourcePath} onChange={(e) => { setSourcePath(e.target.value); setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); }} /></label><div className="source-actions"><button className="secondary" onClick={inspectSource} disabled={loading}>{loading ? "Loading…" : "Load source assets"}</button><button className="secondary" disabled title="Archive upload is the next source-ingest endpoint">Upload Zip/Tar Archive to Source Directory</button></div></div>
+        <div className="source-path-block">
+          <div className="source-directory-label">Source directory</div>
+          <input aria-label="Source directory" value={sourcePath} onChange={(e) => { setSourcePath(e.target.value); setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); setExpandableSourceImages(new Set()); }} />
+          <button type="button" className="secondary source-upload-button" disabled title="Archive upload is the next source-ingest endpoint">Upload Zip/Tar Archive</button>
+          <button type="button" className="secondary source-load-button" onClick={inspectSource} disabled={loading}>{loading ? "Loading…" : "Load Source Directory"}</button>
+        </div>
         {sourceInfo && <>
           <div className="source-selection-toolbar">
             <label className="source-filter-label">Filter filenames
@@ -124,7 +141,7 @@ export function StartPage() {
             <div className="actions source-bulk-actions"><button className="secondary" onClick={selectVisible} disabled={!visibleSourceImages.length}>Select all visible</button><button className="secondary" onClick={deselectVisible} disabled={!visibleSourceImages.length}>Deselect all visible</button></div>
           </div>
           <div className="prep-section-heading"><div><strong>Available source assets</strong><span className="muted"> {visibleSourceImages.length}{visibleSourceImages.length !== sourceInfo.image_count ? ` of ${sourceInfo.image_count}` : ""}</span></div></div>
-          {visibleSourceImages.length > 0 ? <div className="source-selection-grid">{visibleSourceImages.map((image) => <button type="button" key={image.filename} className={`prep-image-card source-selection-card ${selected.has(image.filename) ? "selected" : "excluded"}`} onClick={() => setSelected((current) => { const next = new Set(current); next.has(image.filename) ? next.delete(image.filename) : next.add(image.filename); return next; })}><div className="prep-image-wrap source-selection-image"><img src={image.image_url} alt={image.filename} />{image.has_caption && <span className="caption-badge" title={image.caption}>C</span>}<span className="selection-check">{selected.has(image.filename) ? "✓" : ""}</span></div><div className="prep-image-meta"><strong title={image.filename}>{image.filename}</strong></div></button>)}</div> : <div className="notice">No source assets match <strong>{sourceFilter || "*"}</strong>.</div>}
+          {visibleSourceImages.length > 0 ? <div className="source-selection-grid">{visibleSourceImages.map((image) => <button type="button" key={image.filename} className={`prep-image-card source-selection-card ${selected.has(image.filename) ? "selected" : "excluded"}`} onClick={() => setSelected((current) => { const next = new Set(current); next.has(image.filename) ? next.delete(image.filename) : next.add(image.filename); return next; })}><div className={`prep-image-wrap source-selection-image ${expandableSourceImages.has(image.filename) ? "can-expand" : ""}`}><img src={image.image_url} alt={image.filename} onLoad={(event) => rememberSourceAspect(image.filename, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />{image.has_caption && <span className="caption-badge" title={image.caption}>C</span>}<span className="selection-check">{selected.has(image.filename) ? "✓" : ""}</span></div><div className="prep-image-meta"><strong title={image.filename}>{image.filename}</strong></div></button>)}</div> : <div className="notice">No source assets match <strong>{sourceFilter || "*"}</strong>.</div>}
           <div className="summary-ledger source-accounting-ledger">
             <div><span>Selected Project Assets</span><strong>{selected.size}</strong><small>of {sourceInfo.image_count} available source images</small></div>
             <div><span>Associated Captions</span><strong>{selectedCaptionCount}</strong><small>matching captions in selected assets</small></div>
