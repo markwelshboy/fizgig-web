@@ -336,7 +336,7 @@ export function CaptionsPage() {
       <div><p className="eyebrow">Caption policy</p><div className="card-title">Validation & protected traits</div><p className="muted">Protected phrases are traits you want the LoRA to learn rather than repeatedly name. Fizgig flags them instead of silently deleting them. The trigger word is always exempt from spellcheck.</p></div>
       <div className="form-row">
         <label>Protected traits / phrases<textarea value={protectedDraft} onChange={(event) => setProtectedDraft(event.target.value)} placeholder={"blonde hair\nblue eyes"} /><span className="muted">One per line or comma-separated.</span></label>
-        <label>Accepted spellings<input value={acceptedWordsDraft} onChange={(event) => setAcceptedWordsDraft(event.target.value)} placeholder="LoKR, Welsh, product-name" /><span className="muted">Project dictionary for intentional words spellcheck should ignore.</span></label>
+        <label>Accepted spellings<textarea value={acceptedWordsDraft} onChange={(event) => setAcceptedWordsDraft(event.target.value)} placeholder={"LoKR\nWelsh\nproduct-name"} /><span className="muted">Project dictionary for intentional words spellcheck should ignore. One per line or comma-separated.</span></label>
       </div>
       <div className="actions"><label className="inline-check"><input type="checkbox" checked={spellcheckEnabled} onChange={(event) => setSpellcheckEnabled(event.target.checked)} /> Spellcheck captions</label><button className="secondary" onClick={saveValidationPolicy} disabled={policySaving}>{policySaving ? "Saving…" : "Save caption policy"}</button></div>
     </section>
