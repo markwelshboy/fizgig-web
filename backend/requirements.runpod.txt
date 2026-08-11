@@ -1,0 +1,6 @@
+# The Runpod image installs upstream Fizgig's pinned GPU/ML requirements first.
+# Keep this file limited to the browser API layer so we do not disturb Fizgig's
+# torch/transformers/diffusers compatibility set.
+fastapi
+uvicorn[standard]
+pydantic
