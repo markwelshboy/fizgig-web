@@ -11,6 +11,7 @@ import "./image-prep-stage1.css";
 import "./exception-editor.css";
 import "./exception-editor-polish.css";
 import "./caption-workbench.css";
+import "./caption-toast.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
