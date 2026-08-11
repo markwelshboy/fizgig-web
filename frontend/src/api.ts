@@ -20,12 +20,20 @@ export type AssetTrainingPolicy = "automatic" | "always_train";
 export type AutoRecaptionPolicy = "automatic" | "hold" | "never";
 export type ProjectAssetPolicy = { training_policy: AssetTrainingPolicy; auto_recaption_policy: AutoRecaptionPolicy; updated_at?: string };
 export type ProjectRevisionPolicy = { revision: string; updated_at?: string | null; caption_validation: { protected_phrases: string[]; spellcheck_enabled: boolean; accepted_words: string[] }; assets: Record<string, ProjectAssetPolicy> };
+export type ModelDownloadJob = { id: string; kind: string; repo_id: string; revision: string; model_dir: string; select_when_complete: boolean; status: "queued" | "running" | "complete" | "failed"; phase: string; created_at: string; started_at: string | null; finished_at: string | null; path: string | null; selected: boolean; error: string | null };
+export type SourceArchiveImport = { path: string; archive_name: string; file_count: number; image_count: number; caption_count: number };
+
 async function api<T>(url: string, init?: RequestInit): Promise<T> { const response = await fetch(url, { headers: { "Content-Type": "application/json", ...(init?.headers || {}) }, ...init }); if (!response.ok) { let detail = `${response.status} ${response.statusText}`; try { const body = await response.json(); if (body?.detail) detail = body.detail; } catch {} throw new Error(detail); } return response.json() as Promise<T>; }
+async function apiForm<T>(url: string, form: FormData): Promise<T> { const response = await fetch(url, { method: "POST", body: form }); if (!response.ok) { let detail = `${response.status} ${response.statusText}`; try { const body = await response.json(); if (body?.detail) detail = body.detail; } catch {} throw new Error(detail); } return response.json() as Promise<T>; }
+
 export function listProjects() { return api<ProjectInfo[]>("/api/projects"); }
 export function createProject(args: { name: string; source_path: string; trigger_word?: string; description?: string; selected_filenames?: string[] }) { return api<ProjectCreateResult>("/api/projects", { method: "POST", body: JSON.stringify(args) }); }
 export function getProject(projectId: string) { return api<ProjectInfo>(`/api/projects/${encodeURIComponent(projectId)}`); }
 export function getProjectRevision(projectId: string, revisionId: string) { return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}`); }
 export function createProjectRevision(projectId: string, args: { name: string; model_family: string; parent_revision?: string; import_id?: string }) { return api<ProjectRevision>(`/api/projects/${encodeURIComponent(projectId)}/revisions`, { method: "POST", body: JSON.stringify(args) }); }
+export function importProjectArchive(file: File) { const form = new FormData(); form.append("archive", file); return apiForm<ProjectInfo>("/api/projects/import", form); }
+export function projectExportUrl(projectId: string) { return `/api/projects/${encodeURIComponent(projectId)}/export`; }
+export function uploadSourceArchive(destination: string, file: File) { const form = new FormData(); form.append("destination", destination); form.append("archive", file); return apiForm<SourceArchiveImport>("/api/sources/archive", form); }
 export function getProjectRevisionPolicy(projectId: string, revisionId: string) { return api<ProjectRevisionPolicy>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/policy`); }
 export function updateCaptionValidationPolicy(projectId: string, revisionId: string, args: { protected_phrases?: string[]; spellcheck_enabled?: boolean; accepted_words?: string[] }) { return api<ProjectRevisionPolicy>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/policy/caption-validation`, { method: "PUT", body: JSON.stringify(args) }); }
 export function updateProjectAssetPolicy(projectId: string, revisionId: string, filename: string, args: { training_policy?: AssetTrainingPolicy; auto_recaption_policy?: AutoRecaptionPolicy }) { return api<ProjectRevisionPolicy>(`/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/policy/assets/${encodeURIComponent(filename)}`, { method: "PUT", body: JSON.stringify(args) }); }
@@ -52,4 +60,5 @@ export function generateCaption(datasetId: string, filename: string, request: Ca
 export function unloadCaptionModels() { return api<{ unloaded: string[] }>("/api/captioning/unload", { method: "POST" }); }
 export function getPreferences() { return api<Preferences>("/api/preferences"); }
 export function savePreferences(preferences: Preferences) { return api<Preferences>("/api/preferences", { method: "PUT", body: JSON.stringify(preferences) }); }
-export function downloadQwenModel(args: { repo_id: string; revision?: string; model_dir?: string; use_as_qwen_caption_model?: boolean }) { return api<{ repo_id: string; path: string; selected: boolean }>("/api/models/qwen/download", { method: "POST", body: JSON.stringify(args) }); }
+export function downloadQwenModel(args: { repo_id: string; revision?: string; model_dir?: string; use_as_qwen_caption_model?: boolean }) { return api<ModelDownloadJob>("/api/models/qwen/download", { method: "POST", body: JSON.stringify(args) }); }
+export function getModelDownload(jobId: string) { return api<ModelDownloadJob>(`/api/models/downloads/${encodeURIComponent(jobId)}`); }
