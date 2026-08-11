@@ -112,7 +112,19 @@ The default build helper uses the same `buildkit-scratch` convention as the othe
 bash build_fizgig-web.sh
 ```
 
-That pushes `markwelshboy/fizgig-web:caption-test` by default. The first Runpod template should expose `8000/http`, mount persistent storage at `/workspace`, and set `FIZGIG_WEB_PASSWORD` so the public proxy is protected with browser Basic Auth.
+That pushes `markwelshboy/fizgig-web:caption-test` by default.
+
+For a local smoke test on the Docker build host, `--load-test` keeps the completed image out of the production Docker store under `/var/lib/docker`. It streams the BuildKit result directly into the isolated `docker-test` daemon (default socket `unix:///run/docker-test/docker.sock`):
+
+```bash
+./build_fizgig-web.sh --load-test --tag local-test
+
+docker-test image ls markwelshboy/fizgig-web:local-test
+```
+
+`--load` remains available when an image really should be imported into the normal local Docker daemon; `--no-push` leaves the result in BuildKit cache only. Set `DOCKER_TEST_HOST` to override the test-daemon endpoint.
+
+The first Runpod template should expose `8000/http`, mount persistent storage at `/workspace`, and set `FIZGIG_WEB_PASSWORD` so the public proxy is protected with browser Basic Auth.
 
 See `docs/RUNPOD_TESTING.md` for the complete build, template, GPU-probe and captioning smoke-test flow.
 
