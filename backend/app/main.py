@@ -8,11 +8,13 @@ import platform
 from pathlib import Path
 from urllib.parse import quote
 
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
-from .captioning import add_trigger, caption_service, download_qwen_snapshot
+from .archive_io import import_source_archive, sources_root
+from .captioning import add_trigger, caption_service
+from .model_downloads import model_download_manager
 from .project_api import router as project_router
 from .settings import save_settings, settings_dict
 from . import image_prep as image_prep_module
@@ -147,6 +149,8 @@ def runtime_status() -> dict[str, object]:
     result: dict[str, object] = {
         "python": platform.python_version(),
         "workspace": str(Path("/workspace").resolve()),
+        "sources_root": str(sources_root()),
+        "projects_root": os.environ.get("FIZGIG_PROJECTS_ROOT", ""),
         "fizgig_root": os.environ.get("FIZGIG_ROOT", ""),
         "static_dir": os.environ.get("FIZGIG_WEB_STATIC_DIR", ""),
     }
@@ -191,24 +195,27 @@ def update_preferences(update: PreferencesUpdate) -> dict[str, str]:
     }
 
 
-@app.post("/api/models/qwen/download")
+@app.post("/api/models/qwen/download", status_code=202)
 def download_qwen_model(request: ModelDownloadRequest) -> dict[str, object]:
     try:
-        path = download_qwen_snapshot(request.repo_id, revision=request.revision, model_dir=request.model_dir)
+        return model_download_manager.start_qwen(
+            repo_id=request.repo_id,
+            revision=request.revision,
+            model_dir=request.model_dir,
+            select_when_complete=request.use_as_qwen_caption_model,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail=f"Model download failed: {type(exc).__name__}: {exc}") from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
-    if request.use_as_qwen_caption_model:
-        save_settings({
-            "qwen_caption_model": path,
-            "qwen_caption_processor": "",
-            "qwen_caption_revision": "",
-            **({"caption_model_dir": request.model_dir} if request.model_dir else {}),
-        })
-        caption_service.unload()
-    return {"repo_id": request.repo_id, "path": path, "selected": request.use_as_qwen_caption_model}
+
+@app.get("/api/models/downloads/{job_id}")
+def model_download_status(job_id: str) -> dict[str, object]:
+    try:
+        return model_download_manager.get(job_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown model download job") from exc
 
 
 @app.get("/api/captioning/options")
@@ -219,6 +226,22 @@ def captioning_options() -> dict[str, object]:
 @app.post("/api/captioning/unload")
 def unload_caption_models() -> dict[str, object]:
     return {"unloaded": caption_service.unload()}
+
+
+@app.post("/api/sources/archive")
+def upload_source_archive(
+    destination: str = Form(...),
+    archive: UploadFile = File(...),
+) -> dict[str, object]:
+    filename = archive.filename or "upload"
+    try:
+        return import_source_archive(archive.file, filename, destination)
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Archive import failed: {exc}") from exc
 
 
 @app.post("/api/datasets/inspect")
