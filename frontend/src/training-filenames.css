@@ -1,0 +1,132 @@
+.training-filename-panel {
+  margin-top: 0;
+}
+
+.training-filename-policy {
+  display: grid;
+  gap: 14px;
+}
+
+.training-filename-policy-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 20px;
+  align-items: start;
+}
+
+.training-filename-policy-head p {
+  margin-bottom: 0;
+}
+
+.training-filename-policy-status {
+  display: grid;
+  justify-items: end;
+  gap: 10px;
+  min-width: 320px;
+}
+
+.training-filename-policy-status > strong {
+  color: #dbe8fb;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-filename-samples,
+.training-filename-preview {
+  border: 1px solid #283a53;
+  border-radius: 10px;
+  background: #091321;
+  padding: 10px 12px;
+}
+
+.training-filename-samples {
+  display: grid;
+  gap: 5px;
+}
+
+.training-filename-samples > div,
+.training-filename-map > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  font-size: 12px;
+}
+
+.training-filename-samples span,
+.training-filename-map span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #8799b0;
+}
+
+.training-filename-samples b,
+.training-filename-map b {
+  color: #526984;
+  text-align: center;
+}
+
+.training-filename-samples strong,
+.training-filename-map strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #eef4ff;
+  font-variant-numeric: tabular-nums;
+}
+
+.training-filename-samples small {
+  margin-top: 3px;
+  color: #70839b;
+}
+
+.training-filename-editor {
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #263950;
+  padding-top: 14px;
+}
+
+.training-filename-fields {
+  grid-template-columns: minmax(220px, 1fr) 120px minmax(180px, .7fr);
+}
+
+.training-filename-hint {
+  margin: 0;
+  line-height: 1.55;
+}
+
+.training-filename-hint code {
+  color: #d8e5f7;
+  background: #091321;
+  border: 1px solid #263950;
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+
+.training-filename-preview {
+  display: grid;
+  gap: 10px;
+}
+
+.training-filename-map {
+  display: grid;
+  gap: 6px;
+}
+
+@media (max-width: 900px) {
+  .training-filename-policy-head {
+    grid-template-columns: 1fr;
+  }
+
+  .training-filename-policy-status {
+    justify-items: start;
+    min-width: 0;
+  }
+
+  .training-filename-fields {
+    grid-template-columns: 1fr;
+  }
+}
