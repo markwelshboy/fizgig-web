@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import os
 import re
@@ -29,6 +30,14 @@ _ALLOWED_BASENAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]*$")
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _write_json(path: Path, value: Any) -> None:
@@ -427,10 +436,12 @@ class TrainingFilenameStore:
                 asset["project_filename"] = project_filename
                 asset["training_filename"] = target
                 asset["filename"] = target
+                asset["trainer_image_sha256"] = _sha256(target_path)
         else:
-            for asset, _, project_filename, target in mappings:
+            for asset, source, project_filename, target in mappings:
                 asset["project_filename"] = project_filename
                 asset["training_filename"] = target
+                asset["trainer_image_sha256"] = _sha256(source)
 
         snapshot["training_filenames"] = policy
         _write_json(snapshot_path, snapshot)
