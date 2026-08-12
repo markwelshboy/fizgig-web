@@ -3,6 +3,7 @@ import {
   getCaptioningOptions,
   getProjectRevision,
   getProjectRevisionPolicy,
+  getTrainingFilenames,
   updateCaptionValidationPolicy,
   updateProjectAssetPolicy,
   updateProjectCaption,
@@ -12,6 +13,7 @@ import {
   type CaptionGenerateRequest,
   type CaptioningOptions,
   type ProjectRevisionPolicy,
+  type TrainingFilenameState,
 } from "../api";
 import { generateProjectAssetCaption, preparedProjectAssetUrl } from "../project-captioning-api";
 import { useSession } from "../session";
@@ -47,6 +49,7 @@ export function CaptionsPage() {
   const [maxTokens, setMaxTokens] = useState(120);
   const [addTriggerWord, setAddTriggerWord] = useState(true);
   const [policy, setPolicy] = useState<ProjectRevisionPolicy | null>(null);
+  const [trainingNames, setTrainingNames] = useState<TrainingFilenameState | null>(null);
   const [protectedDraft, setProtectedDraft] = useState("");
   const [acceptedWordsDraft, setAcceptedWordsDraft] = useState("");
   const [spellcheckEnabled, setSpellcheckEnabled] = useState(true);
@@ -56,7 +59,32 @@ export function CaptionsPage() {
   const selectedAsset = assets.find((asset) => asset.filename === selectedName) ?? assets[0];
   const selectedIndex = selectedAsset ? assets.findIndex((asset) => asset.filename === selectedAsset.filename) : -1;
   const [captionDraft, setCaptionDraft] = useState(selectedAsset?.caption ?? "");
+  const revisionAssetVersion = revision?.assets.map((asset) => `${asset.id ?? asset.filename}:${asset.included === false ? 0 : 1}`).join("|") ?? "";
 
+  const trainingNameMaps = useMemo(() => {
+    const byId = new Map<string, string>();
+    const byProjectFilename = new Map<string, string>();
+    for (const row of trainingNames?.rows ?? []) {
+      if (row.asset_id) byId.set(row.asset_id, row.training_filename);
+      byProjectFilename.set(row.project_filename, row.training_filename);
+    }
+    return { byId, byProjectFilename };
+  }, [trainingNames]);
+
+  function displayName(asset: (typeof assets)[number]) {
+    return (asset.id ? trainingNameMaps.byId.get(asset.id) : undefined)
+      ?? trainingNameMaps.byProjectFilename.get(asset.filename)
+      ?? asset.filename;
+  }
+
+  function displayTitle(asset: (typeof assets)[number]) {
+    const trainingName = displayName(asset);
+    return trainingName === asset.filename
+      ? asset.filename
+      : `Training: ${trainingName}\nProject: ${asset.filename}`;
+  }
+
+  const selectedDisplayName = selectedAsset ? displayName(selectedAsset) : "";
   const qwenProvider = options?.providers.find((item) => item.id === "qwen" && "tasks" in item);
   const florenceProvider = options?.providers.find((item) => item.id === "florence" && "models" in item);
   const activeQwenPreset = qwenProvider && "tasks" in qwenProvider ? qwenProvider.tasks[qwenTask] : undefined;
@@ -97,6 +125,13 @@ export function CaptionsPage() {
   }, [project?.id, revision?.id]);
 
   useEffect(() => {
+    if (!project || !revision) { setTrainingNames(null); return; }
+    getTrainingFilenames(project.id, revision.id)
+      .then(setTrainingNames)
+      .catch(() => setTrainingNames(null));
+  }, [project?.id, revision?.id, revisionAssetVersion]);
+
+  useEffect(() => {
     if (!selectedAsset && assets[0]) {
       setSelectedName(assets[0].filename);
       setCaptionDraft(assets[0].caption);
@@ -122,8 +157,8 @@ export function CaptionsPage() {
   const visibleAssets = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return assets;
-    return assets.filter((asset) => asset.filename.toLowerCase().includes(q) || asset.caption.toLowerCase().includes(q));
-  }, [assets, query]);
+    return assets.filter((asset) => displayName(asset).toLowerCase().includes(q) || asset.filename.toLowerCase().includes(q) || asset.caption.toLowerCase().includes(q));
+  }, [assets, query, trainingNameMaps]);
 
   const carouselAssets = useMemo(() => {
     if (!assets.length || selectedIndex < 0) return [];
@@ -232,7 +267,7 @@ export function CaptionsPage() {
 
   async function generateCandidate() {
     if (!project || !revision || !selectedAsset) return;
-    setGenerating(true); setMessage(`Generating candidate for ${selectedAsset.filename}…`);
+    setGenerating(true); setMessage(`Generating candidate for ${displayName(selectedAsset)}…`);
     try {
       const result = await generateProjectAssetCaption(project.id, revision.id, selectedAsset.filename, generationRequest());
       setAiCandidate(result.caption);
@@ -249,7 +284,7 @@ export function CaptionsPage() {
     let completed = 0; let failed = 0;
     try {
       for (const asset of missing) {
-        setBulkProgress(`${completed + failed + 1} / ${missing.length} · ${asset.filename}`);
+        setBulkProgress(`${completed + failed + 1} / ${missing.length} · ${displayName(asset)}`);
         try {
           const result = await generateProjectAssetCaption(project.id, revision.id, asset.filename, generationRequest());
           await saveCanonical(asset.filename, result.caption, "ai_generate_missing", captionMetadata());
@@ -257,7 +292,7 @@ export function CaptionsPage() {
           completed += 1;
         } catch (err) {
           failed += 1;
-          setMessage(err instanceof Error ? err.message : `Failed on ${asset.filename}`);
+          setMessage(err instanceof Error ? err.message : `Failed on ${displayName(asset)}`);
         }
       }
       await refreshRevision();
@@ -308,16 +343,17 @@ export function CaptionsPage() {
     try {
       const next = await updateProjectAssetPolicy(project.id, revision.id, selectedAsset.filename, { training_policy, auto_recaption_policy });
       setPolicy(next);
-      setMessage(`${selectedAsset.filename} training policy saved.`);
+      setMessage(`${displayName(selectedAsset)} training policy saved.`);
     } catch (err) { setMessage(err instanceof Error ? err.message : "Unable to save asset policy"); }
     finally { setPolicySaving(false); }
   }
 
   function AssetThumb({ asset, compact = false }: { asset: (typeof assets)[number]; compact?: boolean }) {
     const status = assetStatus(asset);
-    return <button className={`caption-nav-card ${compact ? "compact" : ""} ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} onClick={() => selectImage(asset.filename)} title={asset.filename}>
-      <img src={imageUrl(asset.filename)} alt={asset.filename} />
-      <span className="caption-nav-name">{asset.filename}</span>
+    const name = displayName(asset);
+    return <button className={`caption-nav-card ${compact ? "compact" : ""} ${selectedAsset?.filename === asset.filename ? "selected" : ""}`} onClick={() => selectImage(asset.filename)} title={displayTitle(asset)}>
+      <img src={imageUrl(asset.filename)} alt={name} />
+      <span className="caption-nav-name">{name}</span>
       <span className="caption-nav-badges">
         {status.missing && <span className="caption-status-dot missing" title="Missing caption" />}
         {status.alwaysTrain && <span className="caption-status-chip" title="Always Train">Train</span>}
@@ -343,12 +379,12 @@ export function CaptionsPage() {
 
     {selectedAsset ? <section className="panel caption-unit-panel">
       <div className="caption-review-heading">
-        <div><p className="eyebrow">Caption review</p><div className="card-title">{selectedAsset.filename}</div></div>
+        <div><p className="eyebrow">Caption review</p><div className="card-title">{selectedDisplayName}</div>{selectedDisplayName !== selectedAsset.filename && <div className="caption-project-filename" title={selectedAsset.filename}>Project file: {selectedAsset.filename}</div>}</div>
         <div className="caption-review-position">{selectedIndex + 1} / {assets.length}</div>
       </div>
 
       <div className="caption-unit-top">
-        <div className="caption-unit-image"><div className="caption-review-canvas"><img src={imageUrl(selectedAsset.filename)} alt={selectedAsset.filename} /></div></div>
+        <div className="caption-unit-image"><div className="caption-review-canvas"><img src={imageUrl(selectedAsset.filename)} alt={selectedDisplayName} /></div></div>
         <div className="caption-unit-copy stack">
           <label className="caption-editor-label">Working Caption<textarea value={captionDraft} onChange={(event) => setCaptionDraft(event.target.value)} /></label>
           <div className="saved-caption-block">
@@ -418,7 +454,7 @@ export function CaptionsPage() {
 
     {assets.length > 0 && <section className="panel caption-navigator stack">
       <button className="caption-browser-toggle" onClick={() => setBrowserOpen((open) => !open)} aria-expanded={browserOpen}><span>{browserOpen ? "Hide asset browser" : `Browse all ${assets.length}`}</span><span className={`caption-browser-chevron ${browserOpen ? "open" : ""}`}>⌄</span></button>
-      {browserOpen && <div className="caption-browser"><div className="caption-browser-toolbar"><input placeholder="Search filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="caption-browser-grid">{browserAssets.map((asset) => <AssetThumb key={asset.filename} asset={asset} />)}</div></div>}
+      {browserOpen && <div className="caption-browser"><div className="caption-browser-toolbar"><input placeholder="Search training/project filenames or captions…" value={query} onChange={(event) => setQuery(event.target.value)} /><span className="muted">{visibleAssets.length} / {assets.length}</span></div><div className="caption-browser-grid">{browserAssets.map((asset) => <AssetThumb key={asset.filename} asset={asset} />)}</div></div>}
       <div className="caption-carousel-row"><button className="caption-carousel-arrow" onClick={() => navigateBy(-1)} aria-label="Previous asset">‹</button><div className="caption-carousel-strip">{carouselAssets.map((asset) => <AssetThumb key={asset.filename} asset={asset} compact />)}</div><button className="caption-carousel-arrow" onClick={() => navigateBy(1)} aria-label="Next asset">›</button></div>
       <div className="caption-carousel-position"><strong>{selectedIndex + 1}</strong> / {assets.length}<span>← → keyboard navigation</span></div>
     </section>}
