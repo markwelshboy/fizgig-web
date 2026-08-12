@@ -1,0 +1,140 @@
+/* Caption diagnostics, provenance overlays, and the denser 5-up review carousel. */
+.caption-spelling-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: -4px;
+  color: #fbbf24;
+  font-size: 11px;
+}
+
+.caption-spelling-label {
+  font-weight: 700;
+}
+
+.caption-spelling-chip {
+  min-height: 24px;
+  padding: 2px 7px;
+  border: 1px solid rgba(251, 191, 36, .45);
+  border-radius: 999px;
+  background: rgba(120, 53, 15, .24);
+  color: #fde68a;
+  font-size: 10px;
+}
+
+.caption-spelling-chip:hover:not(.static) {
+  border-color: #fbbf24;
+  background: rgba(146, 64, 14, .38);
+}
+
+.caption-spelling-chip.static {
+  cursor: default;
+}
+
+.caption-carousel-strip {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.caption-nav-card.compact {
+  grid-template-rows: 112px auto;
+}
+
+.caption-carousel-arrow {
+  height: 104px;
+}
+
+.caption-nav-image-shell {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  background: #06101c;
+}
+
+.caption-nav-image-shell > img {
+  width: 100%;
+  height: 100%;
+}
+
+.caption-nav-badges,
+.caption-nav-policy-badges {
+  position: absolute;
+  right: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  max-width: calc(100% - 12px);
+  pointer-events: none;
+}
+
+.caption-nav-badges {
+  top: 6px;
+}
+
+.caption-nav-policy-badges {
+  bottom: 6px;
+}
+
+.caption-status-glyph {
+  min-width: 19px;
+  height: 19px;
+  padding: 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(203, 213, 225, .5);
+  background: rgba(15, 23, 42, .9);
+  color: #e2e8f0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.caption-status-glyph.ai {
+  border-color: rgba(167, 139, 250, .68);
+  color: #ddd6fe;
+}
+
+.caption-status-glyph.manual {
+  border-color: rgba(125, 211, 252, .68);
+  color: #bae6fd;
+  font-size: 12px;
+}
+
+.caption-status-glyph.saved {
+  border-color: rgba(134, 239, 172, .55);
+  color: #bbf7d0;
+}
+
+.caption-status-glyph.protected,
+.caption-status-glyph.spelling {
+  border-color: rgba(251, 191, 36, .72);
+  color: #fde68a;
+  background: rgba(120, 53, 15, .9);
+}
+
+.caption-status-glyph.spelling {
+  min-width: 19px;
+  padding: 0;
+}
+
+@media (max-width: 1220px) {
+  .caption-carousel-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .caption-carousel-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .caption-carousel-strip > :not(:nth-child(3)) {
+    display: none;
+  }
+}
