@@ -13,6 +13,7 @@ import "./exception-editor-polish.css";
 import "./caption-workbench.css";
 import "./caption-toast.css";
 import "./start-source-layout.css";
+import "./image-helper-overlays.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
