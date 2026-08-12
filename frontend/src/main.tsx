@@ -18,6 +18,7 @@ import "./training-filenames.css";
 import "./caption-training-names.css";
 import "./caption-runtime-controls.css";
 import "./caption-validation.css";
+import "./stage-refinements.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
