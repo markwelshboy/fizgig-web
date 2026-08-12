@@ -38,18 +38,17 @@
   background: #16243a;
 }
 
-/* The generic image-prep polish currently paints an expand glyph on every
-   prep-image-wrap. Source selection can determine this correctly from the
-   image's intrinsic dimensions, so suppress the generic marker here and only
-   show it when React marks the square cover thumbnail as genuinely cropped. */
+/* Source selection can determine whether a square cover thumbnail genuinely
+   hides image area from the image's intrinsic dimensions. Keep this helper in
+   the same bottom-right helper position used by Image Prep cards. */
 .source-selection-image::after {
   display: none !important;
 }
 .source-selection-image.can-expand::after {
   content: "↗↙";
   position: absolute;
-  left: 7px;
-  right: auto;
+  left: auto;
+  right: 7px;
   bottom: 7px;
   z-index: 4;
   display: grid !important;
@@ -73,11 +72,18 @@
   opacity: 1;
 }
 
-/* Project Source is one conceptual three-column table. The label, value, and
-   explanatory columns use the same grid tracks in both visible ledgers. */
+/* Project Source is one conceptual three-column table even though React uses
+   separate ledgers for source identity, accounting, and technical details.
+   Force one set of tracks so all three column starts are identical. */
+.project-source-panel {
+  --project-ledger-label: 200px;
+  --project-ledger-value: minmax(260px, 36%);
+}
 .project-source-panel .project-source-ledger,
-.project-source-panel .source-accounting-ledger {
-  grid-template-columns: 200px minmax(220px, .8fr) 1fr;
+.project-source-panel .source-accounting-ledger,
+.project-source-panel .project-technical-ledger {
+  grid-template-columns: var(--project-ledger-label) var(--project-ledger-value) minmax(0, 1fr) !important;
+  column-gap: 22px;
 }
 
 /* Plumbing identifiers remain available for provenance/debugging without
@@ -98,7 +104,6 @@
   color: #c7d3e8;
 }
 .project-technical-ledger {
-  grid-template-columns: 200px minmax(220px, .8fr) 1fr;
   margin-top: 6px;
 }
 .project-technical-ledger span,
@@ -125,7 +130,7 @@
 
   .project-source-panel .project-source-ledger,
   .project-source-panel .source-accounting-ledger,
-  .project-technical-ledger {
-    grid-template-columns: 1fr;
+  .project-source-panel .project-technical-ledger {
+    grid-template-columns: 1fr !important;
   }
 }
