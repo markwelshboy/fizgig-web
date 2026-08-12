@@ -15,6 +15,7 @@ import "./caption-toast.css";
 import "./start-source-layout.css";
 import "./image-helper-overlays.css";
 import "./training-filenames.css";
+import "./caption-training-names.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
