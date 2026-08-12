@@ -94,7 +94,7 @@ args=(
   --platform "$PLATFORM"
   --tag "$IMAGE:$TAG"
   --build-arg "FIZGIG_REPO=$FIZGIG_REPO"
-  --build-arg "FIZGIG_REF=$FIZG_REF"
+  --build-arg "FIZGIG_REF=$FIZGIG_REF"
   --build-arg "IMAGE_VERSION=$IMAGE_VERSION"
   --build-arg "VCS_REF=$VCS_REF"
   --build-arg "BUILD_DATE=$BUILD_DATE"
