@@ -1,0 +1,58 @@
+/* Shared helper overlays for square cover thumbnails. React decides whether
+   expansion is useful from the pixels actually loaded into the card. Keeping
+   helper badges in one stack prevents origin/expand affordances competing for
+   the same corner as the selection and transform controls. */
+.prep-card-helper-stack {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 5px;
+  max-width: calc(100% - 14px);
+  pointer-events: none;
+}
+
+.prep-card-helper {
+  display: inline-grid;
+  place-items: center;
+  min-height: 20px;
+  padding: 3px 7px;
+  border: 1px solid rgba(190, 154, 255, .75);
+  border-radius: 7px;
+  background: rgba(76, 29, 149, .88);
+  color: #efe6ff;
+  font-size: 10px;
+  font-weight: 750;
+  line-height: 1;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+  white-space: nowrap;
+}
+
+.prep-card-helper.expand {
+  min-width: 26px;
+  padding-inline: 5px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: -2px;
+  opacity: .82;
+}
+
+.prep-image-card:hover .prep-card-helper.expand {
+  opacity: 1;
+}
+
+.prep-card-helper.origin {
+  background: rgba(70, 87, 190, .9);
+  border-color: rgba(157, 169, 255, .72);
+  color: #fff;
+}
+
+/* The old standalone derivative badge occupied the same corner as expansion.
+   It is superseded by the helper stack on working-set derivative cards. */
+.derivative-grid .derived-badge,
+.derivative-card-shell .derived-badge {
+  position: static;
+}
