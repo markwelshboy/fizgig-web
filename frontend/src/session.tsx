@@ -25,13 +25,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [run, setRun] = useState<RunInfo | null>(null);
   const [dataset, setDataset] = useState<DatasetInfo | null>(null);
   const [modelFamily, setModelFamily] = useState<"krea2" | "klein">("krea2");
-  const [triggerWord, setTriggerWord] = useState("sH1VX");
+  const [triggerWord, setTriggerWord] = useState("");
 
   function closeProject() {
     setProject(null);
     setRevision(null);
     setRun(null);
     setDataset(null);
+    setTriggerWord("");
   }
 
   const value = useMemo(

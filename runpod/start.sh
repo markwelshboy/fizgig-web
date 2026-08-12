@@ -58,7 +58,7 @@ except Exception as exc:
     print(f"[fizgig-web] torch probe failed: {type(exc).__name__}: {exc}")
 PY
 
-exec uvicorn app.main:app \
+exec uvicorn app.entrypoint:app \
   --app-dir /opt/fizgig-web/backend \
   --host 0.0.0.0 \
   --port "${FIZGIG_WEB_PORT:-8000}"
