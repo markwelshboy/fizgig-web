@@ -5,7 +5,7 @@ import { ImagePrepWorkbenchPageV4 } from "./ImagePrepWorkbenchPageV4";
 export function ImagePrepWorkbenchPageV5() {
   const { project, revision } = useSession();
   const assetVersion = revision
-    ? `${revision.id}:${revision.assets.length}:${revision.assets.filter((asset) => asset.included !== false).length}`
+    ? `${revision.id}:${revision.assets.filter((asset) => asset.included !== false).map((asset) => asset.id || asset.filename).join(",")}`
     : "none";
 
   return <div className="stack image-prep-v5-shell">
