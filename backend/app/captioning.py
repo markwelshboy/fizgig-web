@@ -270,6 +270,13 @@ class CaptionService:
                 "Qwen3-VL captioning requires torch, Pillow and a Transformers version with Qwen3-VL support"
             ) from exc
 
+        allow_cpu = os.environ.get("FIZGIG_ALLOW_CPU_QWEN", "").strip().lower() in {"1", "true", "yes", "on"}
+        if not torch.cuda.is_available() and not allow_cpu:
+            raise RuntimeError(
+                "Qwen3-VL caption generation requires a CUDA GPU in this runtime. "
+                "Run caption generation on a GPU pod; set FIZGIG_ALLOW_CPU_QWEN=1 only if you intentionally want CPU generation."
+            )
+
         key = (model_source, processor_source, revision)
         if self._qwen_model is None or self._qwen_key != key:
             self._drop_qwen()
