@@ -94,7 +94,7 @@ args=(
   --platform "$PLATFORM"
   --tag "$IMAGE:$TAG"
   --build-arg "FIZGIG_REPO=$FIZGIG_REPO"
-  --build-arg "FIZGIG_REF=$FIZGIG_REF"
+  --build-arg "FIZGIG_REF=$FIZG_REF"
   --build-arg "IMAGE_VERSION=$IMAGE_VERSION"
   --build-arg "VCS_REF=$VCS_REF"
   --build-arg "BUILD_DATE=$BUILD_DATE"
@@ -125,9 +125,29 @@ EOF
 if $LOAD_TEST; then
   # The Docker exporter writes the image tar to stdout. Stream it straight into
   # the isolated test daemon so no image layers are imported into /var/lib/docker.
-  docker buildx build "${args[@]}" --output type=docker,dest=- . \
-    | docker --host "$TEST_DOCKER_HOST" load
+  # Capture docker-load stderr separately: if BuildKit fails before producing a
+  # tar stream, docker load otherwise adds a misleading "invalid archive" error.
+  load_err="$(mktemp)"
+  trap 'rm -f "$load_err"' EXIT
 
+  set +e
+  docker buildx build "${args[@]}" --output type=docker,dest=- . \
+    | docker --host "$TEST_DOCKER_HOST" load 2>"$load_err"
+  pipe_status=("${PIPESTATUS[@]}")
+  set -e
+
+  build_status="${pipe_status[0]:-1}"
+  load_status="${pipe_status[1]:-1}"
+  if (( build_status != 0 )); then
+    exit "$build_status"
+  fi
+  if (( load_status != 0 )); then
+    cat "$load_err" >&2
+    die "docker-test failed to load the completed image stream"
+  fi
+
+  rm -f "$load_err"
+  trap - EXIT
   docker --host "$TEST_DOCKER_HOST" image inspect "$IMAGE:$TAG" >/dev/null
   echo "Loaded $IMAGE:$TAG into docker-test ($TEST_DOCKER_HOST)"
 else
