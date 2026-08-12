@@ -90,7 +90,9 @@
 }
 
 .training-filename-fields {
+  display: grid !important;
   grid-template-columns: minmax(220px, 1fr) 120px minmax(180px, .7fr);
+  align-items: end;
 }
 
 .training-filename-hint {
