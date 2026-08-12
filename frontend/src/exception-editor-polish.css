@@ -121,39 +121,6 @@
   line-height: 1.45;
 }
 
-/* React marks square cover thumbnails as can-expand only when the loaded image
-   is materially non-square. The marker is therefore tied to real hidden image
-   area instead of being painted onto every card. */
-.prep-image-wrap {
-  position: relative;
-}
-.prep-image-wrap.can-expand::after {
-  content: "↗↙";
-  position: absolute;
-  left: 7px;
-  bottom: 7px;
-  z-index: 4;
-  display: grid;
-  place-items: center;
-  min-width: 26px;
-  height: 20px;
-  padding: 0 5px;
-  border: 1px solid rgba(190, 154, 255, .75);
-  border-radius: 7px;
-  background: rgba(76, 29, 149, .88);
-  color: #efe6ff;
-  font-size: 11px;
-  font-weight: 800;
-  line-height: 1;
-  letter-spacing: -2px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
-  opacity: .8;
-  pointer-events: none;
-}
-.prep-image-card:hover .prep-image-wrap.can-expand::after {
-  opacity: 1;
-}
-
 /* Keep every Stage 5 card the same height even when only some cards have an
    override-summary line. The explicit third metadata row becomes the placeholder. */
 #per-image-v4 .processed-grid .prep-image-meta {
