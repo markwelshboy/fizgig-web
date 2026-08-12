@@ -12,6 +12,7 @@ from .prepared_derivatives import prepared_derivative_service
 from .project_captions import project_caption_store
 from .project_policy import project_policy_store
 from .projects import project_store
+from .training_filenames import training_filename_store
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
 
@@ -29,6 +30,7 @@ class PrepOperationCreate(BaseModel): filenames: list[str] = Field(default_facto
 class TransformUpdate(BaseModel): transform: dict[str, Any] = Field(default_factory=dict)
 class AssetTransformUpdate(BaseModel): override: dict[str, Any] = Field(default_factory=dict)
 class TrainingResolutionUpdate(BaseModel): policy: dict[str, Any] = Field(default_factory=dict)
+class TrainingFilenameRequest(BaseModel): mode: str = "normalized"; basename: str = ""; digits: int = Field(default=4, ge=2, le=8); scheme: str = "lineage"; rebuild: bool = False
 class ManualCropCreate(BaseModel): filename: str; aspect_ratio: str = "1:1"; crop: dict[str, float] = Field(default_factory=dict)
 class FaceCropProposalRequest(BaseModel): filenames: list[str] = Field(default_factory=list); aspect_ratio: str = "1:1"; padding_percent: float = Field(default=60.0, ge=0, le=400)
 class FaceCropAcceptRequest(BaseModel): proposals: list[dict[str, Any]] = Field(default_factory=list)
@@ -150,6 +152,20 @@ def update_training_resolution(project_id: str, revision_id: str, request: Train
     try: return image_prep_store.set_training_resolution(project_id, revision_id, request.policy)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except (TypeError, ValueError) as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+@router.get("/{project_id}/revisions/{revision_id}/prep/training-filenames")
+def get_training_filenames(project_id: str, revision_id: str):
+    try: return training_filename_store.get(project_id, revision_id)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+@router.post("/{project_id}/revisions/{revision_id}/prep/training-filenames/preview")
+def preview_training_filenames(project_id: str, revision_id: str, request: TrainingFilenameRequest):
+    try: return training_filename_store.preview(project_id, revision_id, mode=request.mode, basename=request.basename, digits=request.digits, scheme=request.scheme)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+@router.put("/{project_id}/revisions/{revision_id}/prep/training-filenames")
+def update_training_filenames(project_id: str, revision_id: str, request: TrainingFilenameRequest):
+    try: return training_filename_store.update(project_id, revision_id, mode=request.mode, basename=request.basename, digits=request.digits, scheme=request.scheme, rebuild=request.rebuild)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 @router.put("/{project_id}/revisions/{revision_id}/prep/assets/{filename}/transform")
 def update_asset_transform(project_id: str, revision_id: str, filename: str, request: AssetTransformUpdate):
     try: return image_prep_store.set_asset_transform(project_id, revision_id, filename, request.override)
@@ -219,6 +235,7 @@ def create_run(project_id: str, request: RunCreate):
         run = project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=request.config)
         run = image_prep_store.materialize_run_dataset(project_id, request.dataset_revision, run)
         project_policy_store.materialize_for_run(project_id, request.dataset_revision, run)
+        run = training_filename_store.materialize_run(project_id, request.dataset_revision, run)
         return run
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
