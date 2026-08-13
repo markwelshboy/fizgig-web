@@ -119,8 +119,10 @@ export function CaptionsPage() {
   const selectedIndex = selectedAsset ? assets.findIndex((asset) => asset.filename === selectedAsset.filename) : -1;
   const revisionAssetVersion = revision?.assets.map((asset) => `${asset.id ?? asset.filename}:${asset.included === false ? 0 : 1}:${asset.caption_sha256 ?? ""}`).join("|") ?? "";
   const missingCount = assets.filter((asset) => !asset.caption.trim()).length;
+  const batchGeneratesAll = missingCount === 0 && assets.length > 0;
   const modelLoaded = Boolean(captionRuntime?.loaded.length);
   const triggerPending = triggerDraft.trim() !== triggerWord.trim();
+  const triggerConfigured = Boolean(triggerWord.trim());
   const generationBlockedByTrigger = addTriggerWord && triggerPending;
 
   const trainingNameMaps = useMemo(() => {
@@ -462,18 +464,20 @@ export function CaptionsPage() {
   }
 
   async function generateMissing() {
-    if (!project || !revision || generationBlockedByTrigger) return;
+    if (!project || !revision || generationBlockedByTrigger || !assets.length) return;
     const missing = assets.filter((asset) => !asset.caption.trim());
-    if (!missing.length) { setMessage("All included working assets already have captions."); return; }
+    const generateAll = missing.length === 0;
+    const targets = generateAll ? assets : missing;
+    const actionLabel = generateAll ? "Generate All" : "Generate Missing";
     setGenerating(true); setMessage("");
     let completed = 0; let failed = 0;
     try {
-      for (const asset of missing) {
-        setBulkProgress(`${completed + failed + 1} / ${missing.length} · ${displayName(asset)}`);
+      for (const asset of targets) {
+        setBulkProgress(`${completed + failed + 1} / ${targets.length} · ${displayName(asset)}`);
         try {
           const result = await generateProjectAssetCaption(project.id, revision.id, asset.filename, generationRequest());
           markProviderLoaded(provider);
-          await saveCanonical(asset.filename, result.caption, "ai_generate_missing", captionMetadata());
+          await saveCanonical(asset.filename, result.caption, generateAll ? "ai_generate_all" : "ai_generate_missing", captionMetadata());
           if (asset.filename === selectedAsset?.filename) setCaptionDraft(result.caption);
           completed += 1;
         } catch (err) {
@@ -483,7 +487,7 @@ export function CaptionsPage() {
       }
       await refreshRevision();
       await refreshCaptionStatuses();
-      setMessage(`Generate Missing finished: ${completed} committed to project history${failed ? `, ${failed} failed` : ""}.`);
+      setMessage(`${actionLabel} finished: ${completed} committed to project history${failed ? `, ${failed} failed` : ""}.`);
     } finally { setBulkProgress(""); setGenerating(false); }
   }
 
@@ -585,6 +589,7 @@ export function CaptionsPage() {
           <button className="secondary" onClick={saveTriggerWord} disabled={triggerSaving || !triggerPending}>{triggerSaving ? "Saving…" : "Save trigger word"}</button>
         </div>
       </div>
+      {!triggerConfigured && <div className="caption-trigger-unset"><strong>No project trigger word is configured.</strong> Caption generation can still run, but Fizgig cannot insert or validate a trigger token until one is saved here.</div>}
       <div className="form-row">
         <label>Protected traits / phrases<textarea value={protectedDraft} onChange={(event) => setProtectedDraft(event.target.value)} placeholder={"blonde hair\nblue eyes"} /><span className="muted">One per line or comma-separated.</span></label>
         <label>Accepted spellings<textarea value={acceptedWordsDraft} onChange={(event) => setAcceptedWordsDraft(event.target.value)} placeholder={"LoKR\nWelsh\nproduct-name"} /><span className="muted">Project dictionary for intentional words spellcheck should ignore. One per line or comma-separated.</span></label>
@@ -619,7 +624,7 @@ export function CaptionsPage() {
         <div className="caption-ai-action-row">
           <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord && Boolean(triggerWord.trim())} disabled={!triggerWord.trim()} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord.trim() || "set above"})</span></label>
           {modelLoaded && <span className="caption-model-loaded-note">Loaded: {captionRuntime?.loaded.map(providerLabel).join(" + ")}</span>}
-          <div className="caption-ai-actions caption-ai-actions-primary"><button className="primary" onClick={generateCandidate} disabled={generating || generationBlockedByTrigger}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating || missingCount === 0 || generationBlockedByTrigger} title={missingCount === 0 ? "All included assets already have captions" : undefined}>{generating && bulkProgress ? bulkProgress : "Generate Missing"}</button><button className="secondary" onClick={unloadAiModel} disabled={generating || unloading || !modelLoaded}>{unloading ? "Unloading…" : "Unload AI model"}</button></div>
+          <div className="caption-ai-actions caption-ai-actions-primary"><button className="primary" onClick={generateCandidate} disabled={generating || generationBlockedByTrigger}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating || assets.length === 0 || generationBlockedByTrigger} title={batchGeneratesAll ? "Regenerate every included caption" : `Generate captions for ${missingCount} missing asset${missingCount === 1 ? "" : "s"}`}>{generating && bulkProgress ? bulkProgress : batchGeneratesAll ? "Generate All" : "Generate Missing"}</button><button className="secondary" onClick={unloadAiModel} disabled={generating || unloading || !modelLoaded}>{unloading ? "Unloading…" : "Unload AI model"}</button></div>
         </div>
         <label className="caption-candidate-label">Generated Candidate<textarea value={aiCandidate} spellCheck={spellcheckEnabled} onChange={(event) => setAiCandidate(event.target.value)} placeholder="Generate a candidate to compare with the Working Caption above." /></label>
         <SpellingSummary result={candidateSpelling} />
