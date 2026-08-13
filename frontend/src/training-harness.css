@@ -1,4 +1,9 @@
-.training-harness-page { max-width: 1260px; margin: 0 auto; }
+.training-harness-page { width: 100%; max-width: none; margin: 0; }
+.training-model-warning { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 16px; padding: 12px 14px; border: 1px solid rgba(245,158,11,.6); border-radius: 12px; background: linear-gradient(90deg, rgba(120,53,15,.28), rgba(127,29,29,.18)); color: #fde68a; }
+.training-model-warning > div { display: grid; gap: 3px; }
+.training-model-warning strong { color: #fef3c7; }
+.training-model-warning span { color: #fbbf24; font-size: 12px; }
+.training-model-warning .secondary { flex: 0 0 auto; border-color: rgba(245,158,11,.55); color: #fff7ed; }
 .training-harness-header { align-items: center; }
 .training-harness-header .muted { max-width: 820px; line-height: 1.55; }
 .training-header-badges { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
@@ -68,7 +73,7 @@
 }
 
 @media (max-width: 760px) {
-  .training-section-heading, .training-harness-header { align-items: flex-start; flex-direction: column; }
+  .training-model-warning, .training-section-heading, .training-harness-header { align-items: flex-start; flex-direction: column; }
   .training-header-badges { justify-content: flex-start; }
   .training-readiness-grid, .training-readiness-detail-grid, .training-config-grid, .training-config-grid.compact, .training-policy-grid, .training-prepare-summary, .training-telemetry-grid { grid-template-columns: 1fr; }
   .training-span-2 { grid-column: auto; }
