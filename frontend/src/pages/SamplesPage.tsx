@@ -35,7 +35,7 @@ export function SamplesPage() {
   const [message, setMessage] = useState("");
   const [libraryIndex, setLibraryIndex] = useState(0);
   const [editId, setEditId] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(PROMPT_LIBRARY[0].template);
   const [width, setWidth] = useState(1024);
   const [height, setHeight] = useState(1024);
   const [cfgScale, setCfgScale] = useState(4.5);
@@ -52,7 +52,6 @@ export function SamplesPage() {
   }, [project?.id]);
 
   const dirty = Boolean(plan && JSON.stringify(plan) !== savedPlan);
-  const currentSeed = editId ? editSeed : (plan?.authoring.seed_value ?? 42);
   const resolvedTrigger = project?.trigger_word?.trim() || triggerWord.trim();
   const sampleCount = plan?.samples.length ?? 0;
 
@@ -78,13 +77,15 @@ export function SamplesPage() {
 
   function resetEditor(keepShape = true) {
     setEditId(null);
-    setPrompt("");
+    setPrompt(PROMPT_LIBRARY[libraryIndex].template);
     if (!keepShape) { setWidth(1024); setHeight(1024); setCfgScale(4.5); }
     setEditSeed(plan?.authoring.seed_value ?? 42);
   }
 
-  function useLibraryPrompt() {
-    setPrompt(PROMPT_LIBRARY[libraryIndex].template);
+  function chooseLibraryPrompt(index: number) {
+    setLibraryIndex(index);
+    setPrompt(PROMPT_LIBRARY[index].template);
+    setEditId(null);
   }
 
   async function saveSample() {
@@ -113,7 +114,7 @@ export function SamplesPage() {
     const next = { ...plan, samples, authoring };
     await persist(next, editId ? `${definition.id} updated.` : `${definition.id} added to the sampling set.`);
     setEditId(null);
-    setPrompt("");
+    setPrompt(PROMPT_LIBRARY[libraryIndex].template);
     setEditSeed(authoring.seed_value);
   }
 
@@ -155,13 +156,24 @@ export function SamplesPage() {
   return <div className="stack sampling-page">
     <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build a stable set of prompts, dimensions, guidance values and seeds to compare progress throughout training.</p></div></header>
 
+    <section className="panel stack sampling-base-panel">
+      <div className="sample-section-heading sampling-base-heading">
+        <div><p className="eyebrow">Base cadence</p><div className="card-title">When the sampling system runs</div><p className="muted">This cadence is the common baseline for the sample set. Future per-sample downsampling can multiply this cadence for lower-frequency diagnostic probes.</p></div>
+        <label className="sampling-enable-control inline-check"><input type="checkbox" checked={plan.enabled} onChange={(event) => patchPlan({ enabled: event.target.checked })} /> Enable sampling</label>
+      </div>
+      <fieldset className={`sampling-base-controls ${plan.enabled ? "" : "disabled"}`} disabled={!plan.enabled}>
+        <label className="inline-check"><input type="checkbox" checked={plan.schedule.sample_at_start} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, sample_at_start: event.target.checked } })} /> Sample at start</label>
+        <label>Every N epochs<input type="number" min={0} value={plan.schedule.every_n_epochs} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_epochs: Number(event.target.value) } })} /><span className="muted">0 disables epoch cadence.</span></label>
+        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence.</span></label>
+      </fieldset>
+    </section>
+
     <section className="panel stack sample-editor-panel">
       <div className="sample-section-heading"><div><p className="eyebrow">{editId ? "Edit sample" : "New sample"}</p><div className="card-title">{editId ?? "Compose an evaluation sample"}</div></div>{editId && <button className="secondary" onClick={() => resetEditor()}>Cancel edit</button>}</div>
 
       <div className="sample-library-row">
-        <label>Prompt Library<select value={libraryIndex} onChange={(event) => setLibraryIndex(Number(event.target.value))}>{PROMPT_LIBRARY.map((entry, index) => <option key={entry.name} value={index}>{entry.name}</option>)}</select></label>
-        <button className="secondary" onClick={useLibraryPrompt}>Use Prompt</button>
-        <span className="muted">Starter library for this POC; the five templates can be replaced with your final set.</span>
+        <label>Prompt Library<select value={libraryIndex} title={PROMPT_LIBRARY[libraryIndex].template} onChange={(event) => chooseLibraryPrompt(Number(event.target.value))}>{PROMPT_LIBRARY.map((entry, index) => <option key={entry.name} value={index}>{entry.name}</option>)}</select></label>
+        <span className="muted sample-library-copy">Selecting a library entry places its full template in the Prompt box below. The library keeps <code>__trigger__</code> live rather than baking in the current project token.</span>
       </div>
 
       <label>Prompt template<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe the sample. Use __trigger__ wherever the current project trigger should be bound." /></label>
@@ -171,13 +183,15 @@ export function SamplesPage() {
         <label>Width<input type="number" min={128} max={4096} step={8} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
         <label>Height<input type="number" min={128} max={4096} step={8} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
         <label>CFG Scale<input type="number" min={0} max={30} step={0.1} value={cfgScale} onChange={(event) => setCfgScale(Number(event.target.value))} /><span className="muted">Stored per sample even when the distilled sampler does not use CFG.</span></label>
-        {editId ? <label>Seed<input type="number" min={0} max={4294967295} value={editSeed} onChange={(event) => setEditSeed(Number(event.target.value))} /><span className="muted">Concrete seed stored with this sample.</span></label> : <div className="sample-seed-authoring">
-          <span className="caption-control-label">Seed assignment</span>
-          <div className="sample-seed-modes">
-            <label className="inline-check"><input type="radio" name="seed-mode" checked={plan.authoring.seed_mode === "fixed"} onChange={() => patchPlan({ authoring: { ...plan.authoring, seed_mode: "fixed" } })} /> Fixed Seed</label>
-            <label className="inline-check"><input type="radio" name="seed-mode" checked={plan.authoring.seed_mode === "increment"} onChange={() => patchPlan({ authoring: { ...plan.authoring, seed_mode: "increment" } })} /> Auto Increment</label>
+        {editId ? <label>Seed<input type="number" min={0} max={4294967295} value={editSeed} onChange={(event) => setEditSeed(Number(event.target.value))} /><span className="muted">Concrete seed stored with this sample.</span></label> : <div className="sample-seed-field">
+          <span className="sample-field-label">Seed assignment</span>
+          <div className="sample-seed-box">
+            <div className="sample-seed-modes">
+              <label className="inline-check"><input type="radio" name="seed-mode" checked={plan.authoring.seed_mode === "fixed"} onChange={() => patchPlan({ authoring: { ...plan.authoring, seed_mode: "fixed" } })} /> Fixed Seed</label>
+              <label className="inline-check"><input type="radio" name="seed-mode" checked={plan.authoring.seed_mode === "increment"} onChange={() => patchPlan({ authoring: { ...plan.authoring, seed_mode: "increment" } })} /> Auto Increment</label>
+            </div>
+            <label>{plan.authoring.seed_mode === "fixed" ? "Seed" : "Next seed"}<input type="number" min={0} max={4294967295} value={plan.authoring.seed_value} onChange={(event) => patchPlan({ authoring: { ...plan.authoring, seed_value: Math.max(0, Number(event.target.value)) } })} /></label>
           </div>
-          <label>{plan.authoring.seed_mode === "fixed" ? "Seed" : "Next seed"}<input type="number" min={0} max={4294967295} value={plan.authoring.seed_value} onChange={(event) => patchPlan({ authoring: { ...plan.authoring, seed_value: Math.max(0, Number(event.target.value)) } })} /></label>
         </div>}
       </div>
 
@@ -199,22 +213,12 @@ export function SamplesPage() {
     </section>
 
     <section className="panel stack">
-      <div><p className="eyebrow">Generation schedule</p><div className="card-title">When to render the sample set</div></div>
-      <div className="sample-settings-grid">
-        <label className="inline-check"><input type="checkbox" checked={plan.enabled} onChange={(event) => patchPlan({ enabled: event.target.checked })} /> Enable sampling</label>
-        <label className="inline-check"><input type="checkbox" checked={plan.schedule.sample_at_start} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, sample_at_start: event.target.checked } })} /> Sample at start</label>
-        <label>Every N epochs<input type="number" min={0} value={plan.schedule.every_n_epochs} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_epochs: Number(event.target.value) } })} /><span className="muted">0 disables epoch cadence.</span></label>
-        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence.</span></label>
-      </div>
-    </section>
-
-    <section className="panel stack">
       <div><p className="eyebrow">Sampling engine</p><div className="card-title">Shared renderer settings</div><p className="muted">Prompt, dimensions, CFG and concrete seed stay per sample. These controls describe how the entire set is rendered.</p></div>
       <div className="sample-settings-grid">
         <label className="inline-check"><input type="checkbox" checked={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, use_distilled: event.target.checked } })} /> Use distilled / turbo model for samples</label>
         <label>Cache sample model<select value={plan.renderer.cache_model} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, cache_model: event.target.value as SamplingPlan["renderer"]["cache_model"] } })}><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
         <label>Steps<input type="number" min={1} max={500} value={plan.renderer.steps} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, steps: Number(event.target.value) } })} /></label>
-        <label>Flow Shift <span className="muted">Optional</span><input type="number" min={0} step={0.1} value={plan.renderer.flow_shift ?? ""} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
+        <label><span className="sample-field-label-inline">Flow Shift <small>Optional</small></span><input type="number" min={0} step={0.1} value={plan.renderer.flow_shift ?? ""} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
       </div>
       <label>Negative prompt<textarea value={plan.renderer.negative_prompt} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, negative_prompt: event.target.value } })} /></label>
       <div className="sample-distilled-note">{plan.renderer.use_distilled ? "Distilled sampling selected. Per-sample CFG values remain stored so the same probes can be reused unchanged with an undistilled renderer." : "Undistilled sampling selected. Each sample's CFG Scale will be applied."}</div>
