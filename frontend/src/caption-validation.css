@@ -58,6 +58,10 @@
   height: 100%;
 }
 
+.caption-review-canvas {
+  position: relative;
+}
+
 .caption-nav-badges,
 .caption-nav-policy-badges {
   position: absolute;
@@ -76,6 +80,31 @@
 
 .caption-nav-policy-badges {
   bottom: 6px;
+}
+
+.caption-full-status-badges {
+  top: 12px;
+  right: 12px;
+  gap: 6px;
+  z-index: 4;
+}
+
+.caption-full-policy-badges {
+  right: 12px;
+  bottom: 12px;
+  gap: 6px;
+  z-index: 4;
+}
+
+.caption-full-status-badges .caption-status-glyph,
+.caption-full-policy-badges .caption-status-chip {
+  min-height: 24px;
+  font-size: 11px;
+}
+
+.caption-full-status-badges .caption-status-dot {
+  width: 13px;
+  height: 13px;
 }
 
 .caption-status-glyph {
@@ -109,6 +138,18 @@
 .caption-status-glyph.saved {
   border-color: rgba(134, 239, 172, .55);
   color: #bbf7d0;
+}
+
+.caption-status-glyph.trigger {
+  border-color: rgba(251, 146, 60, .78);
+  color: #fed7aa;
+  background: rgba(124, 45, 18, .92);
+}
+
+.caption-status-glyph.unknown {
+  border-color: rgba(148, 163, 184, .55);
+  color: #cbd5e1;
+  background: rgba(51, 65, 85, .88);
 }
 
 .caption-status-glyph.protected,
