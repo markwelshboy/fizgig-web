@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .caption_templates import caption_template_store
 from .projects import project_store
 
 
@@ -93,16 +94,29 @@ class ProjectCaptionStore:
         before = str(asset.get("caption", ""))
         after = caption.strip()
         changed = before != after
+        metadata_value = dict(metadata or {})
+
+        # Project Qwen generation is template-driven. Record the exact saved template state so a
+        # later training run can distinguish caption methodology, not merely provider/model name.
+        if _caption_source(reason, metadata_value) == "ai" and str(metadata_value.get("provider", "")).lower() == "qwen":
+            try:
+                provenance = caption_template_store.provenance(project_id, revision_id)
+                metadata_value["caption_template"] = provenance
+                metadata_value["instruction"] = provenance["rendered_instruction"]
+                metadata_value["trigger_word_added"] = False
+                metadata_value["trigger_binding"] = "template_subject"
+            except (FileNotFoundError, ValueError):
+                pass
 
         if changed:
             when = _now()
-            source = _caption_source(reason, metadata)
+            source = _caption_source(reason, metadata_value)
             asset["caption"] = after
             asset["caption_sha256"] = hashlib.sha256(after.encode("utf-8")).hexdigest()
             asset["caption_updated_at"] = when
             asset["caption_source"] = source if after else "missing"
             asset["caption_reason"] = reason
-            asset["caption_metadata"] = dict(metadata or {})
+            asset["caption_metadata"] = metadata_value
             _write_json(manifest_path, manifest)
 
             event = {
@@ -113,7 +127,7 @@ class ProjectCaptionStore:
                 "reason": reason,
                 "before": before,
                 "after": after,
-                **(metadata or {}),
+                **metadata_value,
             }
             project_dir = project_store.project_dir(project_id)
             _append_jsonl(project_dir / "events.jsonl", event)
