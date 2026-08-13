@@ -27,6 +27,16 @@ def _append_jsonl(path: Path, value: dict[str, Any]) -> None:
         f.flush()
 
 
+def _caption_source(reason: str, metadata: dict[str, Any] | None) -> str:
+    source = str((metadata or {}).get("source", "")).strip().lower()
+    reason_key = reason.strip().lower()
+    if source == "ai" or reason_key.startswith("ai_"):
+        return "ai"
+    if source == "manual" or reason_key == "manual_edit":
+        return "manual"
+    return source or "saved"
+
+
 class ProjectCaptionStore:
     """Canonical caption state for project-owned scratch datasets.
 
@@ -61,6 +71,9 @@ class ProjectCaptionStore:
             "caption": str(asset.get("caption", "")),
             "caption_sha256": asset.get("caption_sha256", ""),
             "caption_updated_at": asset.get("caption_updated_at"),
+            "caption_source": asset.get("caption_source"),
+            "caption_reason": asset.get("caption_reason"),
+            "caption_metadata": asset.get("caption_metadata", {}),
         }
 
     def set_caption(
@@ -83,9 +96,13 @@ class ProjectCaptionStore:
 
         if changed:
             when = _now()
+            source = _caption_source(reason, metadata)
             asset["caption"] = after
             asset["caption_sha256"] = hashlib.sha256(after.encode("utf-8")).hexdigest()
             asset["caption_updated_at"] = when
+            asset["caption_source"] = source if after else "missing"
+            asset["caption_reason"] = reason
+            asset["caption_metadata"] = dict(metadata or {})
             _write_json(manifest_path, manifest)
 
             event = {
