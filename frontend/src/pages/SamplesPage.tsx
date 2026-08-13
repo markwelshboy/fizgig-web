@@ -35,7 +35,7 @@ export function SamplesPage() {
   const [message, setMessage] = useState("");
   const [libraryIndex, setLibraryIndex] = useState(0);
   const [editId, setEditId] = useState<string | null>(null);
-  const [prompt, setPrompt] = useState(PROMPT_LIBRARY[0].template);
+  const [prompt, setPrompt] = useState<string>(PROMPT_LIBRARY[0].template);
   const [width, setWidth] = useState(1024);
   const [height, setHeight] = useState(1024);
   const [cfgScale, setCfgScale] = useState(4.5);
