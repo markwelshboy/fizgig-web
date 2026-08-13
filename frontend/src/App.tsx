@@ -66,6 +66,7 @@ export default function App() {
         <div className="brand"><div className="brand-mark">✦</div><div><strong>Fizgig</strong><span>LoRA Training Studio</span></div></div>
         <nav>{nav.map(([n, label, to]) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><span className="step">{n}</span>{label}</NavLink>)}</nav>
         <div className="sidebar-spacer" />
+        {project && <a className="nav-item export-project-button" href={`/api/projects/${encodeURIComponent(project.id)}/export`} title="Download the complete portable Fizgig project archive"><span className="step">⇩</span>Export Project</a>}
         {project && <button className="nav-item close-project-button" onClick={onCloseProject}><span className="step">×</span>Close Project</button>}
         <NavLink to="/preferences" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>⚙ Preferences</NavLink>
         <div className={`status runtime-status ${activity.busy ? "busy" : "idle"}`} title={activity.detail || activity.label}>
