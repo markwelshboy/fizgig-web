@@ -54,7 +54,9 @@ export function beginLocalActivity(label: string, detail = "") {
 export function subscribeLocalActivity(listener: (status: ActivityStatus) => void) {
   listeners.add(listener);
   listener(localSnapshot());
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
 export function notifyRuntime(message: string, tone: RuntimeNotification["tone"] = "info") {
@@ -64,7 +66,9 @@ export function notifyRuntime(message: string, tone: RuntimeNotification["tone"]
 
 export function subscribeRuntimeNotifications(listener: (notification: RuntimeNotification) => void) {
   notificationListeners.add(listener);
-  return () => notificationListeners.delete(listener);
+  return () => {
+    notificationListeners.delete(listener);
+  };
 }
 
 export async function getActivityStatus(): Promise<ActivityStatus> {
