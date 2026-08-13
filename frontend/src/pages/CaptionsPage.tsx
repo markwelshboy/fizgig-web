@@ -598,7 +598,7 @@ export function CaptionsPage() {
     </section>
 
     {selectedAsset ? <section className="panel caption-unit-panel">
-      <div className="caption-review-heading"><div><p className="eyebrow">Caption review</p><div className="card-title">{selectedDisplayName}</div>{selectedDisplayName !== selectedAsset.filename && <div className="caption-project-filename" title={selectedAsset.filename}>Project file: {selectedAsset.filename}</div>}</div><div className="caption-review-position">{selectedIndex + 1} / {assets.length}</div></div>
+      <div className="caption-review-heading"><div><p className="eyebrow">Caption review</p><div className="card-title">{selectedDisplayName}</div>{selectedDisplayName !== selectedAsset.filename && <div className="caption-project-filename" title={selectedAsset.filename}>Project file: {selectedAsset.filename}</div>}</div><div className="caption-review-position"><button type="button" className="caption-review-arrow" onClick={() => navigateBy(-1)} disabled={assets.length < 2} aria-label="Previous image">‹</button><span>{selectedIndex + 1} / {assets.length}</span><button type="button" className="caption-review-arrow" onClick={() => navigateBy(1)} disabled={assets.length < 2} aria-label="Next image">›</button></div></div>
       <div className="caption-unit-top">
         <div className="caption-unit-image"><div className="caption-review-canvas"><img src={imageUrl(selectedAsset.filename)} alt={selectedDisplayName} /><AssetStatusOverlay asset={selectedAsset} full /></div></div>
         <div className="caption-unit-copy stack">
