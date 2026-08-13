@@ -22,10 +22,13 @@ export type CaptionAssetStatus = {
   reason: string;
   protected_matches: string[];
   spelling_issue_count: number;
+  trigger_word: string;
+  trigger_state: "not_configured" | "present" | "missing" | "case_mismatch";
 };
 
 export type CaptionStatusState = {
   revision: string;
+  trigger_word: string;
   statuses: Record<string, CaptionAssetStatus>;
 };
 
