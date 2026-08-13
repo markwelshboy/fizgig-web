@@ -5,6 +5,15 @@ import { getCaptionStatus, type CaptionStatusState } from "../caption-runtime-ap
 import { useSession } from "../session";
 import { CaptionsPage } from "./CaptionsPage";
 
+function startDownload(url: string) {
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
 export function CaptionsStagePage() {
   const navigate = useNavigate();
   const { project, revision } = useSession();
@@ -73,6 +82,11 @@ export function CaptionsStagePage() {
     return { total, saved, missing: total - saved, triggerConfigured, missingTrigger, spelling, protectedCount, alwaysTrain, held, locked };
   }, [project?.trigger_word, revisionVersion, statuses, policy]);
 
+  function exportRawDataset() {
+    if (!project || !revision) return;
+    startDownload(`/api/projects/${encodeURIComponent(project.id)}/revisions/${encodeURIComponent(revision.id)}/export-dataset`);
+  }
+
   return <div className="caption-stage-shell">
     <CaptionsPage />
     <section className="panel caption-stage-footer">
@@ -113,6 +127,7 @@ export function CaptionsStagePage() {
       </div>
 
       <div className="actions caption-stage-proceed">
+        <button className="secondary" onClick={exportRawDataset} disabled={!project || !revision} title="Download included prepared images and saved captions using the active original/training filename policy">Export Raw Dataset</button>
         <button className="primary" onClick={() => navigate("/samples")}>Proceed to <strong>Sampling</strong> →</button>
       </div>
     </section>
