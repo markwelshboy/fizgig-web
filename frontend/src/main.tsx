@@ -21,6 +21,7 @@ import "./caption-validation.css";
 import "./stage-refinements.css";
 import "./runtime-notification.css";
 import "./caption-sampling-polish.css";
+import "./training-harness.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
