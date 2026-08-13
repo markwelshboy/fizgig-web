@@ -32,21 +32,25 @@ export async function generateProjectAssetCaption(
   filename: string,
   request: ProjectCaptionGenerateRequest,
 ) {
+  const effectiveRequest: ProjectCaptionGenerateRequest = request.provider === "qwen"
+    ? { ...request, use_project_template: true, add_trigger_word: false }
+    : request;
+
   let needsLoad = false;
   try {
     const runtime = await getCaptionRuntimeStatus();
-    needsLoad = !runtime.loaded.includes(request.provider as "qwen" | "florence");
+    needsLoad = !runtime.loaded.includes(effectiveRequest.provider as "qwen" | "florence");
   } catch {
     // Runtime status is advisory; generation itself remains the source of truth.
   }
 
-  const label = providerLabel(request.provider);
+  const label = providerLabel(effectiveRequest.provider);
   if (needsLoad) notifyRuntime(`${label} is not loaded. Downloading/loading the model now…`, "info");
   const endActivity = beginLocalActivity("Captioning", needsLoad ? `Downloading/loading ${label}` : `Generating caption · ${filename}`);
   try {
     return await api<ProjectCaptionGenerateResult>(
       `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}/generate`,
-      { method: "POST", body: JSON.stringify(request) },
+      { method: "POST", body: JSON.stringify(effectiveRequest) },
     );
   } finally {
     endActivity();
