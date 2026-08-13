@@ -99,20 +99,46 @@ def _latest_caption_events(project_id: str, revision_id: str) -> dict[str, dict[
     return latest
 
 
+def _event_value(event: dict[str, Any] | None, key: str) -> str:
+    if not event:
+        return ""
+    direct = event.get(key)
+    if direct is not None:
+        return str(direct)
+    metadata = event.get("metadata")
+    if isinstance(metadata, dict) and metadata.get(key) is not None:
+        return str(metadata.get(key))
+    return ""
+
+
 def _caption_source(asset: dict[str, Any], event: dict[str, Any] | None) -> str:
     caption = str(asset.get("caption", "")).strip()
     if not caption:
         return "missing"
-    if event:
-        source = str(event.get("source", "")).lower()
-        reason = str(event.get("reason", "")).lower()
-        if source == "ai" or reason.startswith("ai_"):
-            return "ai"
-        if source == "manual" or reason == "manual_edit":
-            return "manual"
+
+    persisted = str(asset.get("caption_source", "")).strip().lower()
+    if persisted in {"ai", "manual", "source", "saved"}:
+        return persisted
+
+    source = _event_value(event, "source").lower()
+    reason = (_event_value(event, "reason") or str(asset.get("caption_reason", ""))).lower()
+    if source == "ai" or reason.startswith("ai_"):
+        return "ai"
+    if source == "manual" or reason == "manual_edit":
+        return "manual"
     if asset.get("origin") == "external_source_import":
         return "source"
     return "saved"
+
+
+def _trigger_state(caption: str, trigger: str) -> str:
+    if not trigger:
+        return "not_configured"
+    if trigger in caption:
+        return "present"
+    if trigger.lower() in caption.lower():
+        return "case_mismatch"
+    return "missing"
 
 
 @router.post("/{project_id}/revisions/{revision_id}/caption-spellcheck")
@@ -135,6 +161,7 @@ def caption_status(project_id: str, revision_id: str) -> dict[str, Any]:
     spell_enabled = bool(validation.get("spellcheck_enabled", True))
     accepted = _accepted_words(project, policy)
     latest_events = _latest_caption_events(project_id, revision_id)
+    trigger = str(project.get("trigger_word", "")).strip()
 
     statuses: dict[str, Any] = {}
     for asset in revision.get("assets", []):
@@ -145,11 +172,14 @@ def caption_status(project_id: str, revision_id: str) -> dict[str, Any]:
         lower = caption.lower()
         matches = [phrase for phrase in protected if phrase.lower() in lower]
         event = latest_events.get(filename)
+        reason = _event_value(event, "reason") or str(asset.get("caption_reason", ""))
         statuses[filename] = {
             "saved": bool(caption),
             "source": _caption_source(asset, event),
-            "reason": str(event.get("reason", "")) if event else "",
+            "reason": reason,
             "protected_matches": matches,
             "spelling_issue_count": len(_spell_issues(caption, accepted, suggestions=False)) if spell_enabled and caption else 0,
+            "trigger_word": trigger,
+            "trigger_state": _trigger_state(caption, trigger) if caption else ("not_configured" if not trigger else "missing"),
         }
-    return {"revision": revision_id, "statuses": statuses}
+    return {"revision": revision_id, "trigger_word": trigger, "statuses": statuses}
