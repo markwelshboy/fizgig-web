@@ -21,12 +21,14 @@ export function CaptionsStagePage() {
       setPolicy(null);
       return;
     }
+    const activeProject = project;
+    const activeRevision = revision;
     let cancelled = false;
     async function refresh() {
       try {
         const [nextStatuses, nextPolicy] = await Promise.all([
-          getCaptionStatus(project.id, revision.id),
-          getProjectRevisionPolicy(project.id, revision.id),
+          getCaptionStatus(activeProject.id, activeRevision.id),
+          getProjectRevisionPolicy(activeProject.id, activeRevision.id),
         ]);
         if (!cancelled) {
           setStatuses(nextStatuses);
