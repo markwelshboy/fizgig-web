@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
-import { getActivityStatus, subscribeLocalActivity, type ActivityStatus } from "./activity-api";
+import {
+  getActivityStatus,
+  subscribeLocalActivity,
+  subscribeRuntimeNotifications,
+  type ActivityStatus,
+  type RuntimeNotification,
+} from "./activity-api";
 import { CaptionsStagePage } from "./pages/CaptionsStagePage";
 import { ImagePrepWorkbenchPageV5 } from "./pages/ImagePrepWorkbenchPageV5";
 import { PreferencesPage } from "./pages/PreferencesPage";
@@ -24,9 +30,15 @@ export default function App() {
   const { project, closeProject } = useSession();
   const [backendActivity, setBackendActivity] = useState<ActivityStatus>(IDLE);
   const [localActivity, setLocalActivity] = useState<ActivityStatus>(IDLE);
+  const [notification, setNotification] = useState<RuntimeNotification | null>(null);
   const activity = localActivity.busy ? localActivity : backendActivity;
 
   useEffect(() => subscribeLocalActivity(setLocalActivity), []);
+
+  useEffect(() => subscribeRuntimeNotifications((next) => {
+    setNotification(next);
+    window.setTimeout(() => setNotification((current) => current?.id === next.id ? null : current), 5500);
+  }), []);
 
   useEffect(() => {
     let stopped = false;
@@ -63,6 +75,7 @@ export default function App() {
         </div>
       </aside>
       <main className="content"><Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes></main>
+      {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
     </div>
   );
 }
