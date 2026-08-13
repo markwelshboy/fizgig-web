@@ -1,4 +1,6 @@
 import type { CaptionGenerateRequest } from "./api";
+import { beginLocalActivity, notifyRuntime } from "./activity-api";
+import { getCaptionRuntimeStatus } from "./caption-runtime-api";
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -16,18 +18,37 @@ async function api<T>(url: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>;
 }
 
+function providerLabel(provider: string) {
+  return provider === "florence" ? "Florence-2" : "Qwen3-VL";
+}
+
 export function preparedProjectAssetUrl(projectId: string, revisionId: string, filename: string) {
   return `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/prep/assets/${encodeURIComponent(filename)}/prepared-preview`;
 }
 
-export function generateProjectAssetCaption(
+export async function generateProjectAssetCaption(
   projectId: string,
   revisionId: string,
   filename: string,
   request: CaptionGenerateRequest,
 ) {
-  return api<{ filename: string; caption: string; saved: false; provider: string; prepared_asset: true }>(
-    `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}/generate`,
-    { method: "POST", body: JSON.stringify(request) },
-  );
+  let needsLoad = false;
+  try {
+    const runtime = await getCaptionRuntimeStatus();
+    needsLoad = !runtime.loaded.includes(request.provider as "qwen" | "florence");
+  } catch {
+    // Runtime status is advisory; generation itself remains the source of truth.
+  }
+
+  const label = providerLabel(request.provider);
+  if (needsLoad) notifyRuntime(`${label} is not loaded. Downloading/loading the model now…`, "info");
+  const endActivity = beginLocalActivity("Captioning", needsLoad ? `Downloading/loading ${label}` : `Generating caption · ${filename}`);
+  try {
+    return await api<{ filename: string; caption: string; saved: false; provider: string; prepared_asset: true }>(
+      `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}/generate`,
+      { method: "POST", body: JSON.stringify(request) },
+    );
+  } finally {
+    endActivity();
+  }
 }
