@@ -1,0 +1,36 @@
+.runtime-global-toast {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 2200;
+  width: auto;
+  max-width: 460px;
+  padding: 13px 16px;
+  border: 1px solid #36506f;
+  border-radius: 11px;
+  background: #0b1a2a;
+  color: #dbeafe;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, .4);
+  animation: prep-toast-in .18s ease-out;
+}
+
+.runtime-global-toast.success {
+  border-color: #16794c;
+  background: #08291d;
+  color: #a7f3d0;
+}
+
+.runtime-global-toast.error {
+  border-color: #9f3a45;
+  background: #301117;
+  color: #fecaca;
+}
+
+@media (max-width: 640px) {
+  .runtime-global-toast {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+  }
+}
