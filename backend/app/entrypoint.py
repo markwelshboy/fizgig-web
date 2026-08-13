@@ -3,20 +3,7 @@ from __future__ import annotations
 from fastapi import Request
 
 from .activity import activity_tracker
-from .activity_api import router as activity_router
-from .caption_diagnostics_api import router as caption_diagnostics_router
-from .caption_runtime_api import router as caption_runtime_router
 from .main import app
-from .project_metadata_api import router as project_metadata_router
-from .sampling_api import router as sampling_router
-
-# Keep optional web-only metadata/runtime/diagnostic controls separate from the
-# core API modules while serving them from the same FastAPI application.
-app.include_router(project_metadata_router)
-app.include_router(caption_runtime_router)
-app.include_router(caption_diagnostics_router)
-app.include_router(sampling_router)
-app.include_router(activity_router)
 
 
 def _activity_label(request: Request) -> tuple[str, str] | None:
