@@ -1,6 +1,6 @@
-import type { CaptionGenerateRequest } from "./api";
 import { beginLocalActivity, notifyRuntime } from "./activity-api";
 import { getCaptionRuntimeStatus } from "./caption-runtime-api";
+import type { ProjectCaptionGenerateRequest, ProjectCaptionGenerateResult } from "./caption-template-api";
 
 async function api<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -30,7 +30,7 @@ export async function generateProjectAssetCaption(
   projectId: string,
   revisionId: string,
   filename: string,
-  request: CaptionGenerateRequest,
+  request: ProjectCaptionGenerateRequest,
 ) {
   let needsLoad = false;
   try {
@@ -44,7 +44,7 @@ export async function generateProjectAssetCaption(
   if (needsLoad) notifyRuntime(`${label} is not loaded. Downloading/loading the model now…`, "info");
   const endActivity = beginLocalActivity("Captioning", needsLoad ? `Downloading/loading ${label}` : `Generating caption · ${filename}`);
   try {
-    return await api<{ filename: string; caption: string; saved: false; provider: string; prepared_asset: true }>(
+    return await api<ProjectCaptionGenerateResult>(
       `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}/generate`,
       { method: "POST", body: JSON.stringify(request) },
     );
