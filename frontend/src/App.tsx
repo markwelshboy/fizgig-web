@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   getActivityStatus,
   subscribeLocalActivity,
@@ -27,6 +27,7 @@ const IDLE: ActivityStatus = { busy: false, label: "Idle", detail: "", active_co
 
 export default function App() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { project, closeProject } = useSession();
   const [backendActivity, setBackendActivity] = useState<ActivityStatus>(IDLE);
   const [localActivity, setLocalActivity] = useState<ActivityStatus>(IDLE);
@@ -75,7 +76,13 @@ export default function App() {
           {activity.busy && <small>{activity.detail || activity.label}</small>}
         </div>
       </aside>
-      <main className="content"><Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes></main>
+      <main className="content">
+        {location.pathname === "/training" && <div className="training-model-warning" role="alert">
+          <div><strong>Training models are not configured yet.</strong><span>Configure/download the Krea 2 or Klein training model before launching a real run.</span></div>
+          <button className="secondary" type="button" onClick={() => navigate("/preferences#training-models")}>Setup now</button>
+        </div>}
+        <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
+      </main>
       {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
     </div>
   );
