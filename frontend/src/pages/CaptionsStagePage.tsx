@@ -22,21 +22,26 @@ export function CaptionsStagePage() {
       return;
     }
     let cancelled = false;
-    Promise.all([
-      getCaptionStatus(project.id, revision.id),
-      getProjectRevisionPolicy(project.id, revision.id),
-    ]).then(([nextStatuses, nextPolicy]) => {
-      if (!cancelled) {
-        setStatuses(nextStatuses);
-        setPolicy(nextPolicy);
+    async function refresh() {
+      try {
+        const [nextStatuses, nextPolicy] = await Promise.all([
+          getCaptionStatus(project.id, revision.id),
+          getProjectRevisionPolicy(project.id, revision.id),
+        ]);
+        if (!cancelled) {
+          setStatuses(nextStatuses);
+          setPolicy(nextPolicy);
+        }
+      } catch {
+        if (!cancelled) {
+          setStatuses(null);
+          setPolicy(null);
+        }
       }
-    }).catch(() => {
-      if (!cancelled) {
-        setStatuses(null);
-        setPolicy(null);
-      }
-    });
-    return () => { cancelled = true; };
+    }
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 1800);
+    return () => { cancelled = true; window.clearInterval(timer); };
   }, [project?.id, revision?.id, revisionVersion]);
 
   const summary = useMemo(() => {
