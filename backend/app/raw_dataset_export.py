@@ -55,6 +55,9 @@ def prepare_raw_dataset_export(project_id: str, revision_id: str) -> RawDatasetE
     row_by_project = {str(row.get("project_filename")): row for row in rows}
 
     source_dir = Path(manifest["files_path"]).resolve()
+    if project_dir not in source_dir.parents or not source_dir.is_dir():
+        raise ValueError("Dataset revision files path is outside the project archive boundary")
+
     prepared: list[tuple[dict[str, Any], Path, str]] = []
     archive_names: set[str] = set()
 
