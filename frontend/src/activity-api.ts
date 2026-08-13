@@ -6,6 +6,12 @@ export type ActivityStatus = {
   elapsed_seconds: number;
 };
 
+export type RuntimeNotification = {
+  id: string;
+  message: string;
+  tone: "info" | "success" | "error";
+};
+
 type LocalActivity = {
   token: string;
   label: string;
@@ -15,6 +21,7 @@ type LocalActivity = {
 
 const localActivities = new Map<string, LocalActivity>();
 const listeners = new Set<(status: ActivityStatus) => void>();
+const notificationListeners = new Set<(notification: RuntimeNotification) => void>();
 
 function localSnapshot(): ActivityStatus {
   const active = [...localActivities.values()].sort((a, b) => a.startedAt - b.startedAt);
@@ -48,6 +55,16 @@ export function subscribeLocalActivity(listener: (status: ActivityStatus) => voi
   listeners.add(listener);
   listener(localSnapshot());
   return () => listeners.delete(listener);
+}
+
+export function notifyRuntime(message: string, tone: RuntimeNotification["tone"] = "info") {
+  const notification = { id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, message, tone };
+  notificationListeners.forEach((listener) => listener(notification));
+}
+
+export function subscribeRuntimeNotifications(listener: (notification: RuntimeNotification) => void) {
+  notificationListeners.add(listener);
+  return () => notificationListeners.delete(listener);
 }
 
 export async function getActivityStatus(): Promise<ActivityStatus> {
