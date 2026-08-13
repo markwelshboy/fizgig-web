@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
-import { getActivityStatus, type ActivityStatus } from "./activity-api";
+import { getActivityStatus, subscribeLocalActivity, type ActivityStatus } from "./activity-api";
 import { CaptionsStagePage } from "./pages/CaptionsStagePage";
 import { ImagePrepWorkbenchPageV5 } from "./pages/ImagePrepWorkbenchPageV5";
 import { PreferencesPage } from "./pages/PreferencesPage";
@@ -22,16 +22,20 @@ const IDLE: ActivityStatus = { busy: false, label: "Idle", detail: "", active_co
 export default function App() {
   const navigate = useNavigate();
   const { project, closeProject } = useSession();
-  const [activity, setActivity] = useState<ActivityStatus>(IDLE);
+  const [backendActivity, setBackendActivity] = useState<ActivityStatus>(IDLE);
+  const [localActivity, setLocalActivity] = useState<ActivityStatus>(IDLE);
+  const activity = localActivity.busy ? localActivity : backendActivity;
+
+  useEffect(() => subscribeLocalActivity(setLocalActivity), []);
 
   useEffect(() => {
     let stopped = false;
     async function poll() {
       try {
         const next = await getActivityStatus();
-        if (!stopped) setActivity(next);
+        if (!stopped) setBackendActivity(next);
       } catch {
-        if (!stopped) setActivity(IDLE);
+        if (!stopped) setBackendActivity(IDLE);
       }
     }
     void poll();
@@ -55,7 +59,7 @@ export default function App() {
         <div className={`status runtime-status ${activity.busy ? "busy" : "idle"}`} title={activity.detail || activity.label}>
           <span className="runtime-ready"><i /> Ready</span>
           <strong>{activity.busy ? "BUSY" : "IDLE"}</strong>
-          {activity.busy && <small>{activity.label}</small>}
+          {activity.busy && <small>{activity.detail || activity.label}</small>}
         </div>
       </aside>
       <main className="content"><Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes></main>
