@@ -147,9 +147,20 @@
 }
 
 .caption-status-glyph.unknown {
+  width: 19px;
+  min-width: 19px;
+  padding: 0;
   border-color: rgba(148, 163, 184, .55);
   color: #cbd5e1;
   background: rgba(51, 65, 85, .88);
+}
+
+.caption-full-status-badges .caption-status-glyph.unknown {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0;
 }
 
 .caption-status-glyph.protected,
