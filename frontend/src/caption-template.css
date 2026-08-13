@@ -14,4 +14,8 @@
 .caption-template-editor-body{border-left:2px solid #4c1d95;padding-left:14px}.caption-template-textarea{min-height:430px;line-height:1.45;font-family:ui-monospace,monospace;font-size:11px}
 .caption-template-validation-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;align-items:end}.caption-template-validation-grid .inline-check{border:1px solid #26354c;background:#0a1422;border-radius:9px;padding:9px 10px}.caption-template-validation-grid .inline-check input{width:auto}
 .caption-template-rendered{margin:0;max-height:430px;overflow:auto;white-space:pre-wrap;border:1px solid #26354c;background:#06101b;color:#cbd5e1;border-radius:10px;padding:14px;line-height:1.5;font-size:11px}
+/* Qwen project captioning is owned by the revision template above. The old per-session preset and post-generation trigger controls are deliberately hidden only for the Qwen state; Florence retains them. */
+.caption-ai-primary-controls:has(.caption-preset-control.editable){grid-template-columns:minmax(240px,1fr) minmax(130px,.35fr)}
+.caption-ai-primary-controls .caption-control-field:has(.caption-preset-control.editable){display:none}
+.caption-ai-body:has(.caption-preset-control.editable) .caption-trigger-check{display:none}
 @media(max-width:1000px){.caption-template-profile-row{grid-template-columns:1fr}.caption-template-validation-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:700px){.caption-template-heading{flex-direction:column}.caption-template-validation-grid{grid-template-columns:1fr}}
