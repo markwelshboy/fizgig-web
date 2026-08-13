@@ -130,7 +130,7 @@ export function PreferencesPage() {
       </div>
 
       <div className="grid-2">
-        <section className="panel stack">
+        <section className="panel stack" id="training-models">
           <div className="card-title">Training Models</div>
           <div className="download-row"><div><strong>Krea 2</strong><small>Training model and its required text encoder are configured independently.</small></div><span className="muted">Coming next</span></div>
           <div className="download-row"><div><strong>Klein</strong><small>Training model and encoder configuration remain independent of captioning.</small></div><span className="muted">Coming next</span></div>
