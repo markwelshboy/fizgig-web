@@ -48,10 +48,14 @@ export async function generateProjectAssetCaption(
   if (needsLoad) notifyRuntime(`${label} is not loaded. Downloading/loading the model now…`, "info");
   const endActivity = beginLocalActivity("Captioning", needsLoad ? `Downloading/loading ${label}` : `Generating caption · ${filename}`);
   try {
-    return await api<ProjectCaptionGenerateResult>(
+    const result = await api<ProjectCaptionGenerateResult>(
       `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}/generate`,
       { method: "POST", body: JSON.stringify(effectiveRequest) },
     );
+    if (effectiveRequest.provider === "qwen" && (result.attempts ?? 1) > 1) {
+      notifyRuntime(`Caption binding validation passed on attempt ${result.attempts}.`, "info");
+    }
+    return result;
   } finally {
     endActivity();
   }
