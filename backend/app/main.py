@@ -12,9 +12,14 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, Response, Uploa
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from .activity_api import router as activity_router
 from .archive_io import import_source_archive, sources_root
+from .caption_diagnostics_api import router as caption_diagnostics_router
+from .caption_runtime_api import router as caption_runtime_router
 from .captioning import add_trigger, caption_service
 from .model_downloads import model_download_manager
+from .project_metadata_api import router as project_metadata_router
+from .sampling_api import router as sampling_router
 from .transfer_api import router as transfer_router
 from .project_api import router as project_router
 from .settings import save_settings, settings_dict
@@ -29,8 +34,19 @@ image_prep_module._crop_box = scalable_crop_box
 image_prep_module._effective_transform = prepared_effective_transform
 
 app = FastAPI(title="Fizgig Web API", version="0.1.0")
+
+# IMPORTANT: every API router must be registered before the production SPA
+# catch-all at the bottom of this module. Starlette matches routes in
+# registration order. Registering a later GET API route after /{web_path:path}
+# makes that API unreachable and produces the misleading "API route not found"
+# response from the SPA fallback.
 app.include_router(transfer_router)
 app.include_router(project_router)
+app.include_router(project_metadata_router)
+app.include_router(caption_runtime_router)
+app.include_router(caption_diagnostics_router)
+app.include_router(sampling_router)
+app.include_router(activity_router)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".jxl"}
 _DATASETS: dict[str, Path] = {}
