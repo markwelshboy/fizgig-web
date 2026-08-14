@@ -10,6 +10,7 @@ import {
   type ProjectRevisionPolicy,
   type TrainingFilenameState,
 } from "../api";
+import { getCaptionMethodologies, type CaptionMethodologyPayload } from "../caption-methodologies-api";
 import { getCaptionStatus, type CaptionStatusState } from "../caption-runtime-api";
 import { useSession } from "../session";
 
@@ -43,6 +44,7 @@ export function TrainingPage() {
   const [captionStatus, setCaptionStatus] = useState<CaptionStatusState | null>(null);
   const [policy, setPolicy] = useState<ProjectRevisionPolicy | null>(null);
   const [trainingNames, setTrainingNames] = useState<TrainingFilenameState | null>(null);
+  const [methodologies, setMethodologies] = useState<CaptionMethodologyPayload | null>(null);
   const [loadingReadiness, setLoadingReadiness] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState("");
@@ -70,11 +72,15 @@ export function TrainingPage() {
   const [detectProblems, setDetectProblems] = useState(true);
   const [perImageLr, setPerImageLr] = useState(true);
   const [warmupLookOutliers, setWarmupLookOutliers] = useState(false);
+  const [autoRecaption, setAutoRecaption] = useState(true);
 
   const activeModelFamily = revision?.model_family && revision.model_family !== "generic"
     ? revision.model_family
     : modelFamily;
   const activeTrigger = (project?.trigger_word || triggerWord || "").trim();
+  const methodologyMap = useMemo(() => new Map(
+    methodologies ? [...methodologies.builtins, ...methodologies.customs].map((method) => [method.id, method]) : [],
+  ), [methodologies]);
 
   useEffect(() => {
     if (!project || !revision) {
@@ -82,6 +88,7 @@ export function TrainingPage() {
       setCaptionStatus(null);
       setPolicy(null);
       setTrainingNames(null);
+      setMethodologies(null);
       return;
     }
 
@@ -95,13 +102,15 @@ export function TrainingPage() {
       getCaptionStatus(project.id, revision.id),
       getProjectRevisionPolicy(project.id, revision.id),
       getTrainingFilenames(project.id, revision.id),
+      getCaptionMethodologies(),
     ])
-      .then(([nextPrep, nextCaptionStatus, nextPolicy, nextTrainingNames]) => {
+      .then(([nextPrep, nextCaptionStatus, nextPolicy, nextTrainingNames, nextMethodologies]) => {
         if (cancelled) return;
         setPrep(nextPrep);
         setCaptionStatus(nextCaptionStatus);
         setPolicy(nextPolicy);
         setTrainingNames(nextTrainingNames);
+        setMethodologies(nextMethodologies);
         setTargetMegapixels(String(nextPrep.training_resolution?.max_megapixels ?? 1.0));
       })
       .catch((exc) => {
@@ -159,6 +168,7 @@ export function TrainingPage() {
   }, [revision, prep, captionStatus, policy]);
 
   const canPrepare = Boolean(project && revision && readiness.total > 0 && readiness.missing === 0 && !preparing);
+  const rewriteLadder = methodologies?.rewrite_ladder ?? [];
 
   async function onPrepareRun() {
     if (!project || !revision || !canPrepare) return;
@@ -216,8 +226,9 @@ export function TrainingPage() {
             detect_problem_images: detectProblems,
             per_image_lr: perImageLr,
             warmup_look_outliers: warmupLookOutliers,
-            auto_recaption: false,
-            auto_recaption_reason: "Held until template-driven trigger-safe caption repair is wired into the web trainer.",
+            auto_recaption: autoRecaption,
+            rewrite_ladder: rewriteLadder,
+            intervention_policy: "Per-image Hold/Never suppresses automatic rewrite stages without changing the analytic loss verdict.",
           },
           telemetry: {
             persistent_console_log: true,
@@ -364,10 +375,16 @@ export function TrainingPage() {
           <input type="checkbox" checked={warmupLookOutliers} onChange={(event) => setWarmupLookOutliers(event.target.checked)} />
           <span><strong>Warm-up look outliers</strong><small>Optional curriculum signal for Image Prep look-consistency outliers. Off until we wire scoring into the project.</small></span>
         </label>
-        <div className="training-policy-card blocked">
-          <input type="checkbox" checked={false} disabled />
-          <span><strong>Automatic recaption</strong><small>Intentionally held in this pass. Upstream currently appends the trigger as detached text; we will wire the same trigger-safe caption template engine used by Captioning before enabling this.</small></span>
-        </div>
+        <label className={`training-policy-card ${autoRecaption ? "selected" : ""}`}>
+          <input type="checkbox" checked={autoRecaption} onChange={(event) => setAutoRecaption(event.target.checked)} />
+          <span><strong>Automatic caption resolution</strong><small>When a confirmed stuck image is eligible, apply the explicit three-stage methodology ladder configured in Preferences. Hold/Never images are skipped.</small></span>
+        </label>
+      </div>
+
+      <div className="training-rewrite-ladder">
+        <div><strong>Rewrite ladder</strong><button className="secondary" type="button" onClick={() => navigate("/preferences#caption-methodologies")}>Configure</button></div>
+        <div className="training-chip-row">{rewriteLadder.length ? rewriteLadder.map((id, index) => <span className="training-chip" key={`${id}-${index}`}>Stage {index + 1} · {methodologyMap.get(id)?.name ?? id}</span>) : <span className="muted">Loading caption methodologies…</span>}</div>
+        <small className="muted">The complete methodology definitions, hashes, rendered project variables and stage order are frozen into the prepared run snapshot.</small>
       </div>
 
       <div className="training-principle-note">
@@ -421,7 +438,7 @@ export function TrainingPage() {
         <div><strong>Global training</strong><code>metrics.jsonl</code><small>epoch, step, loss, LR, gradient clipping, weight-norm movement</small></div>
         <div><strong>Per-image loss</strong><code>loss_log/per_image_loss.jsonl</code><small>asset identity, loss trend, verdict, LR multiplier, recaption / exclusion state</small></div>
         <div><strong>Persistent console</strong><code>console.log</code><small>timestamped command, stdout/stderr, lifecycle and exit markers; Copy / Download in the UI</small></div>
-        <div><strong>Run events</strong><code>events.jsonl</code><small>stuck, recaption, manual edit, checkpoint, sample, plateau, pause/resume and final outcome</small></div>
+        <div><strong>Run events</strong><code>events.jsonl</code><small>stuck, recaption stage/methodology, manual edit, checkpoint, sample, plateau, pause/resume and final outcome</small></div>
       </div>
     </section>
 
