@@ -8,14 +8,36 @@ from typing import Any
 
 DEFAULT_QWEN_CAPTION_MODEL = "Qwen/Qwen3-VL-8B-Instruct"
 DEFAULT_CAPTION_MODEL_DIR = "/workspace/models/captioning"
+DEFAULT_TRAINING_MODEL_DIR = "/workspace/models/training"
+DEFAULT_WANDB_RUN_PATTERN = "{project}-{model}-{run_id}"
 
 
 @dataclass
 class AppSettings:
+    # Caption VLM. Deliberately independent from the text encoders used by training.
     qwen_caption_model: str = DEFAULT_QWEN_CAPTION_MODEL
     qwen_caption_processor: str = ""
     qwen_caption_revision: str = ""
     caption_model_dir: str = DEFAULT_CAPTION_MODEL_DIR
+
+    # Training model storage / Fizgig-compatible model paths.
+    training_model_dir: str = DEFAULT_TRAINING_MODEL_DIR
+    krea2_raw_dit: str = ""
+    krea2_text_encoder: str = ""
+    krea2_vae: str = ""
+    krea2_turbo_lora: str = ""
+    krea2_turbo_dit: str = ""
+    base_dit: str = ""
+    text_encoder: str = ""
+    vae: str = ""
+    distilled_dit: str = ""
+
+    # Generic experiment tracking. Run-specific names are resolved by the training harness.
+    log_with: str = "all"
+    wandb_api_key: str = ""
+    wandb_entity: str = ""
+    wandb_project: str = "fizgig"
+    wandb_run_pattern: str = DEFAULT_WANDB_RUN_PATTERN
 
 
 def _settings_path() -> Path:
@@ -29,6 +51,12 @@ def load_settings() -> AppSettings:
         qwen_caption_processor=os.environ.get("FIZGIG_QWEN_CAPTION_PROCESSOR", ""),
         qwen_caption_revision=os.environ.get("FIZGIG_QWEN_CAPTION_REVISION", ""),
         caption_model_dir=os.environ.get("FIZGIG_CAPTION_MODEL_DIR", DEFAULT_CAPTION_MODEL_DIR),
+        training_model_dir=os.environ.get("FIZGIG_TRAINING_MODEL_DIR", DEFAULT_TRAINING_MODEL_DIR),
+        wandb_api_key=os.environ.get("WANDB_API_KEY", ""),
+        wandb_entity=os.environ.get("WANDB_ENTITY", ""),
+        wandb_project=os.environ.get("WANDB_PROJECT", "fizgig"),
+        wandb_run_pattern=os.environ.get("FIZGIG_WANDB_RUN_PATTERN", DEFAULT_WANDB_RUN_PATTERN),
+        log_with=os.environ.get("FIZGIG_LOG_WITH", "all"),
     )
     path = _settings_path()
     if not path.is_file():
