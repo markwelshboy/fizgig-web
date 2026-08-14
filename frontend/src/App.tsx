@@ -7,7 +7,7 @@ import {
   type ActivityStatus,
   type RuntimeNotification,
 } from "./activity-api";
-import { CaptionsStagePageV2 } from "./pages/CaptionsStagePageV2";
+import { CaptionsStagePage } from "./pages/CaptionsStagePage";
 import { ImagePrepWorkbenchPageV5 } from "./pages/ImagePrepWorkbenchPageV5";
 import { PreferencesPage } from "./pages/PreferencesPage";
 import { SamplesPage } from "./pages/SamplesPage";
@@ -81,7 +81,7 @@ export default function App() {
           <div><strong>Training models are not configured yet.</strong><span>Configure/download the Krea 2 or Klein training model before launching a real run.</span></div>
           <button className="secondary" type="button" onClick={() => navigate("/preferences#training-models")}>Setup now</button>
         </div>}
-        <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePageV2 />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
+        <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
       </main>
       {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
     </div>
