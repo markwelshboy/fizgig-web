@@ -15,6 +15,7 @@ import { getCaptionMethodologies, type CaptionMethodologyPayload } from "../capt
 import { getCaptionStatus, type CaptionStatusState } from "../caption-runtime-api";
 import { TrainingTelemetryPanel } from "../components/TrainingTelemetryPanel";
 import { useSession } from "../session";
+import { getTrainingModelState, type TrainingModelState } from "../training-models-api";
 
 type PrecisionMode = "fp8" | "bf16" | "nf4";
 type CompileMode = "auto" | "off" | "on";
@@ -71,6 +72,7 @@ export function TrainingPage() {
   const [trainingNames, setTrainingNames] = useState<TrainingFilenameState | null>(null);
   const [methodologies, setMethodologies] = useState<CaptionMethodologyPayload | null>(null);
   const [trackingPrefs, setTrackingPrefs] = useState<TrackingPreferences>({});
+  const [trainingModelState, setTrainingModelState] = useState<TrainingModelState | null>(null);
   const [loadingReadiness, setLoadingReadiness] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState("");
@@ -112,6 +114,8 @@ export function TrainingPage() {
     ? (trackingPrefs.wandb_run_pattern || DEFAULT_WANDB_PATTERN)
     : wandbPatternChoice;
   const trackingEnabled = trackingPrefs.log_with === "all" || trackingPrefs.log_with === "wandb";
+  const activeTrainingModels = trainingModelState?.families.find((family) => family.id === activeModelFamily);
+  const trainingModelsReady = Boolean(activeTrainingModels?.ready);
   const runPatternValues = {
     project: project?.name || "project",
     model: activeModelFamily || "model",
@@ -136,6 +140,7 @@ export function TrainingPage() {
     let cancelled = false;
     setLoadingReadiness(true);
     setError("");
+    setTrainingModelState(null);
 
     Promise.all([
       getImagePrepState(project.id, revision.id),
@@ -144,8 +149,9 @@ export function TrainingPage() {
       getTrainingFilenames(project.id, revision.id),
       getCaptionMethodologies(),
       getPreferences(),
+      getTrainingModelState(),
     ])
-      .then(([nextPrep, nextCaptionStatus, nextPolicy, nextTrainingNames, nextMethodologies, nextPreferences]) => {
+      .then(([nextPrep, nextCaptionStatus, nextPolicy, nextTrainingNames, nextMethodologies, nextPreferences, nextTrainingModels]) => {
         if (cancelled) return;
         setPrep(nextPrep);
         setCaptionStatus(nextCaptionStatus);
@@ -153,6 +159,7 @@ export function TrainingPage() {
         setTrainingNames(nextTrainingNames);
         setMethodologies(nextMethodologies);
         setTrackingPrefs(nextPreferences as unknown as TrackingPreferences);
+        setTrainingModelState(nextTrainingModels);
         setTargetMegapixels(String(nextPrep.training_resolution?.max_megapixels ?? 1.0));
       })
       .catch((exc) => {
@@ -209,7 +216,7 @@ export function TrainingPage() {
     };
   }, [revision, prep, captionStatus, policy]);
 
-  const canPrepare = Boolean(project && revision && readiness.total > 0 && readiness.missing === 0 && !preparing);
+  const canPrepare = Boolean(project && revision && readiness.total > 0 && readiness.missing === 0 && trainingModelsReady && !preparing);
   const rewriteLadder = methodologies?.rewrite_ladder ?? [];
 
   async function onPrepareRun() {
@@ -338,7 +345,7 @@ export function TrainingPage() {
         <div className="training-readiness-card"><span>Included images</span><strong>{loadingReadiness ? "…" : readiness.total}</strong><small>{revision.id}</small></div>
         <div className={`training-readiness-card ${readiness.missing ? "warn" : "good"}`}><span>Saved captions</span><strong>{loadingReadiness ? "…" : `${readiness.saved}/${readiness.total}`}</strong><small>{readiness.missing ? `${readiness.missing} must be completed before preparing a run` : "Ready"}</small></div>
         <div className={`training-readiness-card ${!activeTrigger || readiness.triggerWarnings ? "warn" : "good"}`}><span>Trigger binding</span><strong>{activeTrigger || "None"}</strong><small>{!activeTrigger ? "No project trigger configured" : readiness.triggerWarnings ? `${readiness.triggerWarnings} caption warning${readiness.triggerWarnings === 1 ? "" : "s"}` : "No trigger warnings"}</small></div>
-        <div className="training-readiness-card"><span>Training names</span><strong>{trainingNames?.policy.mode === "normalized" ? "Normalized" : "Original"}</strong><small>{trainingNames?.policy.mode === "normalized" ? `${trainingNames.policy.basename || activeTrigger || "dataset"}_… .png` : "Project filenames preserved"}</small></div>
+        <div className={`training-readiness-card ${trainingModelsReady ? "good" : "warn"}`}><span>{modelLabel(activeModelFamily)} models</span><strong>{trainingModelState === null ? "Checking…" : trainingModelsReady ? "Ready" : "Missing"}</strong><small>{trainingModelsReady ? "Core DiT, text encoder and VAE found" : "Configure core training weights in Preferences"}</small></div>
       </div>
 
       <div className="training-readiness-detail-grid">
@@ -465,6 +472,8 @@ export function TrainingPage() {
       {!canPrepare && <div className="training-blockers">
         {readiness.total === 0 && <span>No included training images.</span>}
         {readiness.missing > 0 && <span>{readiness.missing} included image{readiness.missing === 1 ? " has" : "s have"} no saved caption.</span>}
+        {trainingModelState === null && <span>Checking {modelLabel(activeModelFamily)} training model readiness…</span>}
+        {trainingModelState !== null && !trainingModelsReady && <span>{modelLabel(activeModelFamily)} core training models are not ready. Configure them in Preferences → Models.</span>}
         {preparing && <span>Preparing run snapshot…</span>}
       </div>}
 
@@ -477,6 +486,7 @@ export function TrainingPage() {
 
       <div className="actions">
         <button className="secondary" onClick={() => navigate("/samples")}>Back to Sampling</button>
+        {!trainingModelsReady && trainingModelState !== null && <button className="secondary" onClick={() => navigate("/preferences#training-models")}>Configure Models</button>}
         <button className="primary" disabled={!canPrepare} onClick={() => void onPrepareRun()}>{preparing ? "Preparing…" : "Prepare Training Run"}</button>
       </div>
     </section>
