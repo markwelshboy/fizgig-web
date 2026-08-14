@@ -39,6 +39,11 @@ function decisionNumber(state: DecisionImageState, field: string) {
   return finite(value) ? value : null;
 }
 
+function eventNumber(event: Record<string, unknown>, field: string) {
+  const value = event[field];
+  return finite(value) ? value : null;
+}
+
 function scalePoints(values: number[]): { points: NumericPoint[]; min: number; max: number } {
   if (!values.length) return { points: [], min: 0, max: 1 };
   let min = Math.min(...values);
@@ -85,7 +90,7 @@ function significantDecision(snapshot: DecisionSnapshot) {
   return Object.values(snapshot.images).some((image) => ["suspect", "watch", "stuck", "exhausted", "excluded"].includes(image.verdict || ""));
 }
 
-function GlobalLossChart({ metrics, decisions }: { metrics: TrainingMetric[]; decisions: DecisionSnapshot[] }) {
+function GlobalLossChart({ metrics, decisions, events }: { metrics: TrainingMetric[]; decisions: DecisionSnapshot[]; events: Array<Record<string, unknown>> }) {
   const lossRows = metrics.filter((row) => row.type === "loss" && finite(row.loss_moving_average));
   const lrRows = metrics.filter((row) => row.type === "step_context" && metricNumber(row, "lr") !== null);
   if (!lossRows.length) return <div className="training-chart-empty">Waiting for the first training loss observation…</div>;
@@ -93,13 +98,19 @@ function GlobalLossChart({ metrics, decisions }: { metrics: TrainingMetric[]; de
   const loss = scalePoints(lossRows.map((row) => row.loss_moving_average as number));
   const lrValues = lrRows.map((row) => metricNumber(row, "lr") as number);
   const lr = scalePoints(lrValues);
-  const maxEpoch = Math.max(1, ...lossRows.map((row) => finite(row.epoch) ? row.epoch : 1), ...decisions.map((row) => row.epoch));
+  const adaptiveEvents = events.filter((event) => event.type === "adaptive_lr_decision" && event.changed === true);
+  const maxEpoch = Math.max(
+    1,
+    ...lossRows.map((row) => finite(row.epoch) ? row.epoch : 1),
+    ...decisions.map((row) => row.epoch),
+    ...adaptiveEvents.map((event) => eventNumber(event, "epoch") ?? 1),
+  );
   const latestLoss = lossRows[lossRows.length - 1].loss_moving_average as number;
   const latestLr = lrValues.length ? lrValues[lrValues.length - 1] : null;
 
   return <div className="training-chart-shell">
     <div className="training-chart-heading">
-      <div><strong>Global training loss</strong><small>Fizgig moving average · direct trainer observation</small></div>
+      <div><strong>Global training loss</strong><small>Fizgig moving average · actual optimizer LR · direct trainer observations</small></div>
       <div className="training-chart-stats"><span>loss <strong>{formatNumber(latestLoss)}</strong></span>{latestLr !== null && <span>LR <strong>{formatNumber(latestLr, 6)}</strong></span>}</div>
     </div>
     <svg className="training-chart" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="img" aria-label="Global training loss and learning-rate trajectory">
@@ -109,7 +120,12 @@ function GlobalLossChart({ metrics, decisions }: { metrics: TrainingMetric[]; de
       })}
       {decisions.filter(significantDecision).map((decision) => {
         const x = PAD_X + (decision.epoch / maxEpoch) * (VIEW_W - PAD_X * 2);
-        return <line key={`decision-${decision.epoch}`} className={`training-chart-decision-line ${decision.plateaued ? "plateau" : ""}`} x1={x} x2={x} y1={PAD_Y} y2={VIEW_H - PAD_Y}><title>{decision.plateaued ? `Plateau @ epoch ${decision.epoch}` : `Loss-watch decision @ epoch ${decision.epoch}`}</title></line>;
+        return <line key={`decision-${decision.epoch}`} className={`training-chart-decision-line ${decision.plateaued ? "plateau" : ""}`} x1={x} x2={x} y1={PAD_Y} y2={VIEW_H - PAD_Y}><title>{decision.plateaued ? `Plateau @ epoch ${decision.epoch}` : `Per-image loss-watch decision @ epoch ${decision.epoch}`}</title></line>;
+      })}
+      {adaptiveEvents.map((event, index) => {
+        const epoch = eventNumber(event, "epoch") ?? 1;
+        const x = PAD_X + (epoch / maxEpoch) * (VIEW_W - PAD_X * 2);
+        return <line key={`adaptive-${epoch}-${index}`} className="training-chart-adaptive-line" x1={x} x2={x} y1={PAD_Y} y2={VIEW_H - PAD_Y}><title>{`Adaptive LR @ epoch ${epoch}: ${String(event.action || "change")} · ${formatNumber(eventNumber(event, "before_lr") ?? 0, 6)} → ${formatNumber(eventNumber(event, "after_lr") ?? 0, 6)} · ${String(event.reason || "")}`}</title></line>;
       })}
       <path className="training-chart-loss-line" d={pathFor(loss.points)} />
       {lr.points.length > 1 && <path className="training-chart-lr-line" d={pathFor(lr.points)} />}
@@ -118,7 +134,13 @@ function GlobalLossChart({ metrics, decisions }: { metrics: TrainingMetric[]; de
       <text className="training-chart-axis-label" x={5} y={PAD_Y + 4}>{formatNumber(loss.max)}</text>
       <text className="training-chart-axis-label" x={5} y={VIEW_H - PAD_Y}>{formatNumber(loss.min)}</text>
     </svg>
-    <div className="training-chart-legend"><span className="loss">Loss MA</span>{lr.points.length > 1 && <span className="lr">Optimizer LR (normalized scale)</span>}<span className="decision">Decision boundary</span></div>
+    <div className="training-chart-legend"><span className="loss">Loss MA</span>{lr.points.length > 1 && <span className="lr">Optimizer LR (normalized scale)</span>}<span className="decision">Per-image decision</span>{adaptiveEvents.length > 0 && <span className="adaptive">Adaptive LR change</span>}</div>
+    {adaptiveEvents.length > 0 && <div className="training-decision-ribbon adaptive-ribbon">{adaptiveEvents.slice(-8).map((event, index) => {
+      const epoch = eventNumber(event, "epoch") ?? 0;
+      const before = eventNumber(event, "before_lr") ?? 0;
+      const after = eventNumber(event, "after_lr") ?? 0;
+      return <span key={`${epoch}-${index}`}><strong>E{epoch}</strong> {String(event.action || "LR change")} · {formatNumber(before, 6)}→{formatNumber(after, 6)}</span>;
+    })}</div>}
   </div>;
 }
 
@@ -165,6 +187,16 @@ function ImageTrajectoryChart({ selectedAsset, decisions }: { selectedAsset: str
       return <span key={`${entry.snapshot.epoch}-${entry.state.verdict}`} className={`verdict-${entry.state.verdict || "mid"}`}><strong>E{entry.snapshot.epoch}</strong> {entry.state.verdict || "mid"} · wants ×{recommended.toFixed(2)}</span>;
     })}</div>
   </div>;
+}
+
+function eventDetail(event: Record<string, unknown>) {
+  if (event.type === "adaptive_lr_decision") {
+    const action = String(event.action || "LR decision");
+    const before = eventNumber(event, "before_lr");
+    const after = eventNumber(event, "after_lr");
+    return `${action}${before !== null && after !== null ? ` · ${formatNumber(before, 6)}→${formatNumber(after, 6)}` : ""}`;
+  }
+  return String(event.stage || event.time || "");
 }
 
 export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }: Props) {
@@ -249,7 +281,7 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
       <div><span>Telemetry</span><strong>{telemetry?.metrics.length || 0} metric rows · {telemetry?.decision_history.length || 0} epoch decisions</strong></div>
     </div>
 
-    <GlobalLossChart metrics={telemetry?.metrics || []} decisions={telemetry?.decision_history || []} />
+    <GlobalLossChart metrics={telemetry?.metrics || []} decisions={telemetry?.decision_history || []} events={telemetry?.events || []} />
 
     <div className="training-trajectory-toolbar">
       <div><strong>Individual trajectory</strong><small>Uses Fizgig's epoch-boundary normalized residual, rather than comparing raw diffusion loss across unrelated timesteps.</small></div>
@@ -267,11 +299,11 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
       <div><strong>Dense global observations</strong><code>metrics.jsonl</code><small>loss, moving-average loss, optimizer LR, sampled timestep and asset identity</small></div>
       <div><strong>Raw per-image observations</strong><code>loss_log/per_image_loss.jsonl</code><small>asset, timestep, raw loss, bucket residual and EMA</small></div>
       <div><strong>Epoch decisions</strong><code>loss_log/decision_history.jsonl</code><small>normalized trend, verdict, multiplier recommendation, plateau and best-epoch estimate</small></div>
-      <div><strong>Audit trail</strong><code>events.jsonl + console.log</code><small>command lifecycle plus timestamped stdout/stderr; charts never depend on parsing console text</small></div>
+      <div><strong>Audit trail</strong><code>events.jsonl + console.log</code><small>adaptive-LR decisions, command lifecycle and timestamped stdout/stderr; charts never depend on parsing console text</small></div>
     </div>
 
     <div className="training-runtime-details">
-      <div className="training-event-list"><strong>Recent run events</strong>{eventRows.length ? eventRows.map((event, index) => <div key={`${String(event.time || "")}-${index}`}><span>{String(event.type || "event")}</span><small>{String(event.stage || event.time || "")}</small></div>) : <span className="muted">No run events yet.</span>}</div>
+      <div className="training-event-list"><strong>Recent run events</strong>{eventRows.length ? eventRows.map((event, index) => <div key={`${String(event.time || "")}-${index}`}><span>{String(event.type || "event")}</span><small title={String(event.reason || "")}>{eventDetail(event)}</small></div>) : <span className="muted">No run events yet.</span>}</div>
       <details className="training-console-tail"><summary>Persistent console tail</summary><pre>{telemetry?.console_tail.length ? telemetry.console_tail.join("\n") : "No console output yet."}</pre></details>
     </div>
   </section>;
