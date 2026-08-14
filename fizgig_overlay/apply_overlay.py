@@ -54,14 +54,15 @@ def main() -> None:
     replace_once(
         loss_logger,
         '            try:\n                d = os.path.join(self.output_dir, "loss_log")\n',
-        '            try:\n'
-        '                from fizgig.training.web_telemetry import emit_decision_snapshot\n'
-        '                emit_decision_snapshot(epoch=epoch, stats=stats, improving_count=improving_count,\n'
-        '                                       plateaued=self.plateaued, pending_count=self.plateau_pending,\n'
-        '                                       best_epoch_estimate=self.best_epoch_estimate,\n'
-        '                                       recommended_multipliers=self._mult)\n'
-        '            except Exception:\n'
-        '                pass\n'
+        '            if os.environ.get("FIZGIG_TELEMETRY_DIR", "").strip():\n'
+        '                try:\n'
+        '                    from fizgig.training.web_telemetry import emit_decision_snapshot\n'
+        '                    emit_decision_snapshot(epoch=epoch, stats=stats, improving_count=improving_count,\n'
+        '                                           plateaued=self.plateaued, pending_count=self.plateau_pending,\n'
+        '                                           best_epoch_estimate=self.best_epoch_estimate,\n'
+        '                                           recommended_multipliers=self._mult)\n'
+        '                except Exception:\n'
+        '                    pass\n'
         '            try:\n'
         '                d = os.path.join(self.output_dir, "loss_log")\n',
     )
