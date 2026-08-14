@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   getImagePrepState,
+  getPreferences,
   getProject,
   getProjectRevisionPolicy,
   getTrainingFilenames,
@@ -16,6 +17,21 @@ import { useSession } from "../session";
 
 type PrecisionMode = "fp8" | "bf16" | "nf4";
 type CompileMode = "auto" | "off" | "on";
+type TrackingPreferences = {
+  log_with?: string;
+  wandb_project?: string;
+  wandb_entity?: string;
+  wandb_run_pattern?: string;
+};
+
+const PREFERENCES_PATTERN = "__preferences__";
+const DEFAULT_WANDB_PATTERN = "{project}-{model}-{run_id}";
+const WANDB_PATTERN_OPTIONS = [
+  { value: "{project}-{model}-{run_id}", label: "Project · Model · Run ID" },
+  { value: "{project}-{run_id}", label: "Project · Run ID" },
+  { value: "{trigger}-{model}-{run_id}", label: "Trigger · Model · Run ID" },
+  { value: "{run_name}", label: "Run name" },
+];
 
 function numberValue(value: string, fallback: number) {
   const parsed = Number(value);
@@ -26,6 +42,14 @@ function modelLabel(value: string) {
   if (value === "krea2") return "Krea 2";
   if (value === "klein") return "Klein";
   return value || "Model";
+}
+
+function renderRunPattern(pattern: string, values: Record<string, string>) {
+  let rendered = pattern || DEFAULT_WANDB_PATTERN;
+  for (const [key, value] of Object.entries(values)) {
+    rendered = rendered.split(`{${key}}`).join(value);
+  }
+  return rendered.replace(/--+/g, "-").replace(/^-|-$/g, "");
 }
 
 export function TrainingPage() {
@@ -45,6 +69,7 @@ export function TrainingPage() {
   const [policy, setPolicy] = useState<ProjectRevisionPolicy | null>(null);
   const [trainingNames, setTrainingNames] = useState<TrainingFilenameState | null>(null);
   const [methodologies, setMethodologies] = useState<CaptionMethodologyPayload | null>(null);
+  const [trackingPrefs, setTrackingPrefs] = useState<TrackingPreferences>({});
   const [loadingReadiness, setLoadingReadiness] = useState(false);
   const [preparing, setPreparing] = useState(false);
   const [error, setError] = useState("");
@@ -73,6 +98,7 @@ export function TrainingPage() {
   const [perImageLr, setPerImageLr] = useState(true);
   const [warmupLookOutliers, setWarmupLookOutliers] = useState(false);
   const [autoRecaption, setAutoRecaption] = useState(true);
+  const [wandbPatternChoice, setWandbPatternChoice] = useState(PREFERENCES_PATTERN);
 
   const activeModelFamily = revision?.model_family && revision.model_family !== "generic"
     ? revision.model_family
@@ -81,6 +107,19 @@ export function TrainingPage() {
   const methodologyMap = useMemo(() => new Map(
     methodologies ? [...methodologies.builtins, ...methodologies.customs].map((method) => [method.id, method]) : [],
   ), [methodologies]);
+  const effectiveWandbPattern = wandbPatternChoice === PREFERENCES_PATTERN
+    ? (trackingPrefs.wandb_run_pattern || DEFAULT_WANDB_PATTERN)
+    : wandbPatternChoice;
+  const trackingEnabled = trackingPrefs.log_with === "all" || trackingPrefs.log_with === "wandb";
+  const runPatternValues = {
+    project: project?.name || "project",
+    model: activeModelFamily || "model",
+    run_id: run?.id || "run-####",
+    run_name: runName.trim() || project?.name || "run",
+    trigger: activeTrigger || "trigger",
+    revision: revision?.id || "revision",
+  };
+  const wandbRunPreview = renderRunPattern(effectiveWandbPattern, runPatternValues);
 
   useEffect(() => {
     if (!project || !revision) {
@@ -103,14 +142,16 @@ export function TrainingPage() {
       getProjectRevisionPolicy(project.id, revision.id),
       getTrainingFilenames(project.id, revision.id),
       getCaptionMethodologies(),
+      getPreferences(),
     ])
-      .then(([nextPrep, nextCaptionStatus, nextPolicy, nextTrainingNames, nextMethodologies]) => {
+      .then(([nextPrep, nextCaptionStatus, nextPolicy, nextTrainingNames, nextMethodologies, nextPreferences]) => {
         if (cancelled) return;
         setPrep(nextPrep);
         setCaptionStatus(nextCaptionStatus);
         setPolicy(nextPolicy);
         setTrainingNames(nextTrainingNames);
         setMethodologies(nextMethodologies);
+        setTrackingPrefs(nextPreferences as unknown as TrackingPreferences);
         setTargetMegapixels(String(nextPrep.training_resolution?.max_megapixels ?? 1.0));
       })
       .catch((exc) => {
@@ -221,6 +262,13 @@ export function TrainingPage() {
           runtime: {
             base_precision: precision,
             compile_blocks: compileMode,
+          },
+          tracking: {
+            log_with: trackingPrefs.log_with || "",
+            wandb_project: trackingPrefs.wandb_project || "",
+            wandb_entity: trackingPrefs.wandb_entity || "",
+            wandb_run_name_pattern: effectiveWandbPattern,
+            credential_source: "Preferences / environment; API keys are deliberately not copied into run snapshots.",
           },
           loss_watch: {
             detect_problem_images: detectProblems,
@@ -354,6 +402,19 @@ export function TrainingPage() {
         </div>
         <label className="training-toggle"><input type="checkbox" checked={cachePreparation} onChange={(event) => setCachePreparation(event.target.checked)} /> <span><strong>Prepare latent / text caches</strong><small>Enabled by default for a fresh run.</small></span></label>
       </div>
+
+      <div className="training-subsection">
+        <div className="training-subsection-title">Experiment tracking</div>
+        <div className="training-tracking-row">
+          <label>W&B run naming<select value={wandbPatternChoice} disabled={!trackingEnabled} onChange={(event) => setWandbPatternChoice(event.target.value)}>
+            <option value={PREFERENCES_PATTERN}>Preferences default · {trackingPrefs.wandb_run_pattern || DEFAULT_WANDB_PATTERN}</option>
+            {WANDB_PATTERN_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+          </select></label>
+          <div className={`training-tracking-preview ${trackingEnabled ? "" : "disabled"}`}><span>{trackingEnabled ? "Resolved run name" : "W&B disabled by Preferences"}</span><strong>{trackingEnabled ? wandbRunPreview : "—"}</strong><small>{trackingEnabled ? `${trackingPrefs.wandb_project || "fizgig"}${trackingPrefs.wandb_entity ? ` · ${trackingPrefs.wandb_entity}` : ""}` : "TensorBoard-only or logging disabled"}</small></div>
+          <button className="secondary" type="button" onClick={() => navigate("/preferences#tracking-logging")}>Configure tracking</button>
+        </div>
+        <small className="muted">The selected pattern and account/project defaults are snapshotted with the run. W&B credentials remain in Preferences or the pod environment and are never copied into project exports.</small>
+      </div>
     </section>
 
     <section className="panel stack training-intelligence-panel">
@@ -425,6 +486,7 @@ export function TrainingPage() {
       <div className="training-run-paths">
         <div><span>Run directory</span><code>{run.output_dir}</code></div>
         <div><span>Materialized trainer dataset</span><code>{run.dataset_path}</code></div>
+        {trackingEnabled && <div><span>W&B run name</span><code>{wandbRunPreview}</code></div>}
       </div>
       <p className="muted">This snapshot is now project-owned. Starting the Fizgig subprocess will become a separate explicit action so configuration, launch, pause/resume, and failure state remain auditable.</p>
     </section>}
