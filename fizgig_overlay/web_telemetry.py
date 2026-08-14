@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +59,22 @@ def emit_step_context(*, epoch: int, global_step: int, lr: float, timestep: floa
         "timestep": float(timestep),
         "asset": keys[0] if len(keys) == 1 else "|".join(keys),
         "loss_multiplier": float(loss_multiplier),
+    })
+
+
+def emit_adaptive_lr(*, epoch: int, loss: float, action: str, reason: str,
+                     before_lr: float, after_lr: float, weight_growth: float | None) -> None:
+    _append("events.jsonl", {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "type": "adaptive_lr_decision",
+        "epoch": int(epoch),
+        "loss": float(loss),
+        "action": str(action),
+        "reason": str(reason),
+        "before_lr": float(before_lr),
+        "after_lr": float(after_lr),
+        "weight_growth": float(weight_growth) if weight_growth is not None else None,
+        "changed": float(before_lr) != float(after_lr),
     })
 
 
