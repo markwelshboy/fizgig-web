@@ -46,13 +46,14 @@ def _settings_path() -> Path:
 
 
 def load_settings() -> AppSettings:
+    env_wandb_key = os.environ.get("WANDB_API_KEY", "")
     settings = AppSettings(
         qwen_caption_model=os.environ.get("FIZGIG_QWEN_CAPTION_MODEL", DEFAULT_QWEN_CAPTION_MODEL),
         qwen_caption_processor=os.environ.get("FIZGIG_QWEN_CAPTION_PROCESSOR", ""),
         qwen_caption_revision=os.environ.get("FIZGIG_QWEN_CAPTION_REVISION", ""),
         caption_model_dir=os.environ.get("FIZGIG_CAPTION_MODEL_DIR", DEFAULT_CAPTION_MODEL_DIR),
         training_model_dir=os.environ.get("FIZGIG_TRAINING_MODEL_DIR", DEFAULT_TRAINING_MODEL_DIR),
-        wandb_api_key=os.environ.get("WANDB_API_KEY", ""),
+        wandb_api_key=env_wandb_key,
         wandb_entity=os.environ.get("WANDB_ENTITY", ""),
         wandb_project=os.environ.get("WANDB_PROJECT", "fizgig"),
         wandb_run_pattern=os.environ.get("FIZGIG_WANDB_RUN_PATTERN", DEFAULT_WANDB_RUN_PATTERN),
@@ -67,8 +68,13 @@ def load_settings() -> AppSettings:
         return settings
     for key in asdict(settings):
         value = data.get(key)
-        if isinstance(value, str):
-            setattr(settings, key, value)
+        if not isinstance(value, str):
+            continue
+        # An explicitly configured pod secret remains authoritative when the stored
+        # preference is blank. This lets users keep WANDB_API_KEY out of preferences.json.
+        if key == "wandb_api_key" and not value.strip() and env_wandb_key:
+            continue
+        setattr(settings, key, value)
     return settings
 
 
