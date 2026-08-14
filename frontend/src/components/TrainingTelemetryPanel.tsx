@@ -3,6 +3,7 @@ import {
   getRunTelemetry,
   getTrainingStatus,
   startTraining,
+  type DecisionImageState,
   type DecisionSnapshot,
   type RunInfo,
   type TrainingMetric,
@@ -22,6 +23,7 @@ const VIEW_W = 1000;
 const VIEW_H = 250;
 const PAD_X = 46;
 const PAD_Y = 24;
+const ACTIVE_RUN_STATES = new Set(["starting", "cache_latents", "cache_text", "training"]);
 
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
@@ -29,6 +31,11 @@ function finite(value: unknown): value is number {
 
 function metricNumber(row: TrainingMetric, field: string) {
   const value = (row as unknown as Record<string, unknown>)[field];
+  return finite(value) ? value : null;
+}
+
+function decisionNumber(state: DecisionImageState, field: string) {
+  const value = (state as unknown as Record<string, unknown>)[field];
   return finite(value) ? value : null;
 }
 
@@ -116,9 +123,10 @@ function GlobalLossChart({ metrics, decisions }: { metrics: TrainingMetric[]; de
 }
 
 function ImageTrajectoryChart({ selectedAsset, decisions }: { selectedAsset: string; decisions: DecisionSnapshot[] }) {
-  const rows = decisions
-    .map((snapshot) => ({ snapshot, state: snapshot.images[selectedAsset] }))
-    .filter((entry) => entry.state && finite(entry.state.mean_residual));
+  const rows = decisions.flatMap((snapshot) => {
+    const state = snapshot.images[selectedAsset];
+    return state && finite(state.mean_residual) ? [{ snapshot, state }] : [];
+  });
   if (!rows.length) return <div className="training-chart-empty">This image does not have an epoch-boundary trajectory yet.</div>;
 
   const scaled = scalePoints(rows.map((entry) => entry.state.mean_residual as number));
@@ -126,12 +134,18 @@ function ImageTrajectoryChart({ selectedAsset, decisions }: { selectedAsset: str
   const minEpoch = Math.min(...epochs);
   const maxEpoch = Math.max(...epochs);
   const current = rows[rows.length - 1].state;
+  const currentRecommended = decisionNumber(current, "recommended_multiplier");
+  const currentEffective = decisionNumber(current, "multiplier");
   const verdictChanges = rows.filter((entry, index) => index === 0 || entry.state.verdict !== rows[index - 1].state.verdict);
 
   return <div className="training-chart-shell">
     <div className="training-chart-heading">
       <div className="training-selected-asset"><strong title={selectedAsset}>{selectedAsset}</strong><small>Re-normalized per-image residual at each Fizgig epoch boundary</small></div>
-      <div className="training-chart-stats"><span>verdict <strong>{current.verdict || "—"}</strong></span><span>multiplier <strong>×{finite(current.multiplier) ? current.multiplier.toFixed(3) : "1.000"}</strong></span></div>
+      <div className="training-chart-stats">
+        <span>verdict <strong>{current.verdict || "—"}</strong></span>
+        {currentRecommended !== null && <span>recommended <strong>×{currentRecommended.toFixed(3)}</strong></span>}
+        <span>effective <strong>×{(currentEffective ?? 1).toFixed(3)}</strong></span>
+      </div>
     </div>
     <svg className="training-chart" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="img" aria-label={`Per-image loss trajectory for ${selectedAsset}`}>
       {[0, 1, 2, 3, 4].map((index) => {
@@ -140,13 +154,16 @@ function ImageTrajectoryChart({ selectedAsset, decisions }: { selectedAsset: str
       })}
       {scaled.min <= 0 && scaled.max >= 0 && <line className="training-chart-zero-line" x1={PAD_X} x2={VIEW_W - PAD_X} y1={PAD_Y + ((scaled.max - 0) / (scaled.max - scaled.min)) * (VIEW_H - PAD_Y * 2)} y2={PAD_Y + ((scaled.max - 0) / (scaled.max - scaled.min)) * (VIEW_H - PAD_Y * 2)} />}
       <path className="training-chart-image-line" d={pathFor(scaled.points)} />
-      {rows.map((entry, index) => <circle key={`${entry.snapshot.epoch}-${index}`} className={`training-chart-point verdict-${entry.state.verdict || "mid"}`} cx={scaled.points[index].x} cy={scaled.points[index].y} r={verdictChanges.includes(entry) ? 5 : 3}><title>{`Epoch ${entry.snapshot.epoch}: ${entry.state.verdict || "mid"} · residual ${formatNumber(entry.state.mean_residual as number)}`}</title></circle>)}
+      {rows.map((entry, index) => <circle key={`${entry.snapshot.epoch}-${index}`} className={`training-chart-point verdict-${entry.state.verdict || "mid"}`} cx={scaled.points[index].x} cy={scaled.points[index].y} r={verdictChanges.includes(entry) ? 5 : 3}><title>{`Epoch ${entry.snapshot.epoch}: ${entry.state.verdict || "mid"} · residual ${formatNumber(entry.state.mean_residual as number)} · recommended ×${(decisionNumber(entry.state, "recommended_multiplier") ?? 1).toFixed(2)} · effective ×${(decisionNumber(entry.state, "multiplier") ?? 1).toFixed(2)}`}</title></circle>)}
       <text className="training-chart-axis-label" x={PAD_X} y={VIEW_H - 5}>epoch {minEpoch}</text>
       <text className="training-chart-axis-label" textAnchor="end" x={VIEW_W - PAD_X} y={VIEW_H - 5}>epoch {maxEpoch}</text>
       <text className="training-chart-axis-label" x={5} y={PAD_Y + 4}>{formatNumber(scaled.max)}</text>
       <text className="training-chart-axis-label" x={5} y={VIEW_H - PAD_Y}>{formatNumber(scaled.min)}</text>
     </svg>
-    <div className="training-decision-ribbon">{verdictChanges.slice(-8).map((entry) => <span key={`${entry.snapshot.epoch}-${entry.state.verdict}`} className={`verdict-${entry.state.verdict || "mid"}`}><strong>E{entry.snapshot.epoch}</strong> {entry.state.verdict || "mid"}{finite(entry.state.multiplier) ? ` ×${entry.state.multiplier.toFixed(2)}` : ""}</span>)}</div>
+    <div className="training-decision-ribbon">{verdictChanges.slice(-8).map((entry) => {
+      const recommended = decisionNumber(entry.state, "recommended_multiplier") ?? 1;
+      return <span key={`${entry.snapshot.epoch}-${entry.state.verdict}`} className={`verdict-${entry.state.verdict || "mid"}`}><strong>E{entry.snapshot.epoch}</strong> {entry.state.verdict || "mid"} · wants ×{recommended.toFixed(2)}</span>;
+    })}</div>
   </div>;
 }
 
@@ -174,8 +191,7 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
 
   useEffect(() => {
     void refresh();
-    const active = !["completed", "failed"].includes(run.status);
-    if (!active) return;
+    if (!ACTIVE_RUN_STATES.has(run.status)) return;
     const timer = window.setInterval(() => void refresh(), 2500);
     return () => window.clearInterval(timer);
   }, [refresh, run.status]);
@@ -211,6 +227,9 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
   const latestDecision = selectedAsset
     ? [...(telemetry?.decision_history || [])].reverse().find((snapshot) => snapshot.images[selectedAsset])
     : undefined;
+  const latestState = latestDecision?.images[selectedAsset];
+  const latestRecommended = latestState ? decisionNumber(latestState, "recommended_multiplier") : null;
+  const latestEffective = latestState ? decisionNumber(latestState, "multiplier") : null;
 
   return <section className="panel stack training-telemetry-panel">
     <div className="training-section-heading">
@@ -222,7 +241,7 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
       </div>
     </div>
 
-    <div className="training-baseline-note"><strong>Observation only.</strong> This run enables Fizgig's loss watcher so we can see its evidence and verdicts, but the web launcher does not enable per-image LR, auto-recaption, look-outlier warm-up, exclusions, or web policy overrides. This is the A/B baseline before we allow the harness to shape training.</div>
+    <div className="training-baseline-note"><strong>Observation only.</strong> This run enables Fizgig's loss watcher so we can see its evidence and recommendations, but the web launcher does not enable per-image LR, auto-recaption, look-outlier warm-up, exclusions, or web policy overrides. This is the A/B baseline before we allow the harness to shape training.</div>
 
     <div className="training-software-strip">
       <div><span>Upstream Fizgig</span><code title={upstreamSha}>{upstreamSha === "unknown" ? upstreamSha : upstreamSha.slice(0, 12)}</code></div>
@@ -238,10 +257,10 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
     </div>
     {selectedAsset ? <ImageTrajectoryChart selectedAsset={selectedAsset} decisions={telemetry?.decision_history || []} /> : <div className="training-chart-empty">Per-image trajectories appear after Fizgig has enough observations to classify the dataset.</div>}
 
-    {latestDecision && <div className="training-current-decision">
+    {latestDecision && latestState && <div className="training-current-decision">
       <span>Latest selected-image decision</span>
-      <strong>Epoch {latestDecision.epoch} · {latestDecision.images[selectedAsset]?.verdict || "mid"}</strong>
-      <small>Analytic verdict only in this baseline. No web intervention is applied.</small>
+      <strong>Epoch {latestDecision.epoch} · {latestState.verdict || "mid"}</strong>
+      <small>Fizgig recommendation ×{(latestRecommended ?? 1).toFixed(2)} · effective ×{(latestEffective ?? 1).toFixed(2)}. The baseline records the recommendation but does not apply it.</small>
     </div>}
 
     <div className="training-telemetry-contract">
