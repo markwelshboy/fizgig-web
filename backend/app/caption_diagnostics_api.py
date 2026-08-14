@@ -80,6 +80,30 @@ def _spell_issues(text: str, accepted: set[str], *, suggestions: bool) -> list[d
     return result
 
 
+def _protected_phrase_pattern(phrase: str) -> re.Pattern[str] | None:
+    """Match a protected phrase as words, never as an arbitrary substring.
+
+    A simple ``phrase in caption`` check made a protected trait such as ``ring``
+    match ``wearing``, ``during`` and ``spring``. Whitespace inside multi-word
+    phrases is flexible, but the outer edges must not continue an alphanumeric
+    token. Punctuation may sit immediately outside the phrase.
+    """
+    words = [part for part in re.split(r"\s+", phrase.strip()) if part]
+    if not words:
+        return None
+    body = r"\s+".join(re.escape(part) for part in words)
+    return re.compile(rf"(?<![A-Za-z0-9]){body}(?![A-Za-z0-9])", re.IGNORECASE)
+
+
+def _protected_matches(text: str, protected: list[str]) -> list[str]:
+    matches: list[str] = []
+    for phrase in protected:
+        pattern = _protected_phrase_pattern(phrase)
+        if pattern is not None and pattern.search(text):
+            matches.append(phrase)
+    return matches
+
+
 def _latest_caption_events(project_id: str, revision_id: str) -> dict[str, dict[str, Any]]:
     events_path = project_store.project_dir(project_id) / "events.jsonl"
     latest: dict[str, dict[str, Any]] = {}
@@ -169,8 +193,7 @@ def caption_status(project_id: str, revision_id: str) -> dict[str, Any]:
         if not filename:
             continue
         caption = str(asset.get("caption", "")).strip()
-        lower = caption.lower()
-        matches = [phrase for phrase in protected if phrase.lower() in lower]
+        matches = _protected_matches(caption, protected)
         event = latest_events.get(filename)
         reason = _event_value(event, "reason") or str(asset.get("caption_reason", ""))
         statuses[filename] = {
