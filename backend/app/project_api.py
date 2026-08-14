@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
+from .caption_methodologies import caption_methodology_store
 from .captioning import add_trigger, caption_service
 from .caption_templates import GRAMMAR_PROFILES, caption_template_store
 from .image_prep import image_prep_store
@@ -23,7 +24,7 @@ class RunCreate(BaseModel): name: str; model_family: str; dataset_revision: str;
 class RunEventCreate(BaseModel): type: str; payload: dict[str, Any] = Field(default_factory=dict)
 class ArtifactCreate(BaseModel): type: str; path: str; metadata: dict[str, Any] = Field(default_factory=dict)
 class ProjectCaptionUpdate(BaseModel): caption: str; reason: str = "manual_edit"; metadata: dict[str, Any] = Field(default_factory=dict); materialize: bool = False; run_id: str | None = None
-class ProjectCaptionGenerate(BaseModel): provider: str = "qwen"; model: str | None = None; model_path: str | None = None; processor: str | None = None; revision: str | None = None; task: str | None = None; instruction: str | None = None; max_tokens: int | None = Field(default=None, ge=16, le=1024); trigger_word: str = ""; add_trigger_word: bool = True; save: bool = False; use_project_template: bool = False
+class ProjectCaptionGenerate(BaseModel): provider: str = "qwen"; model: str | None = None; model_path: str | None = None; processor: str | None = None; revision: str | None = None; task: str | None = None; instruction: str | None = None; max_tokens: int | None = Field(default=None, ge=16, le=1024); trigger_word: str = ""; add_trigger_word: bool = True; save: bool = False; methodology_id: str | None = None; use_project_template: bool = False
 class CaptionValidationPolicyUpdate(BaseModel): protected_phrases: list[str] | None = None; spellcheck_enabled: bool | None = None; accepted_words: list[str] | None = None
 class AssetPolicyUpdate(BaseModel): training_policy: str | None = None; auto_recaption_policy: str | None = None
 class InclusionUpdate(BaseModel): filenames: list[str] = Field(default_factory=list); included: bool
@@ -133,6 +134,8 @@ def update_asset_policy(project_id: str, revision_id: str, filename: str, reques
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+# Kept as the lightweight project identity/grammar binding API. The reusable
+# methodology prompts themselves now live in application Preferences.
 @router.get("/{project_id}/revisions/{revision_id}/caption-template")
 def get_caption_template(project_id: str, revision_id: str):
     try:
@@ -237,13 +240,36 @@ def generate_project_caption(project_id: str, revision_id: str, filename: str, r
         with tempfile.NamedTemporaryFile(suffix=".png") as temp:
             temp.write(prepared_png)
             temp.flush()
-            if request.provider == "qwen" and request.use_project_template:
-                generated = caption_template_store.generate_qwen(project_id, revision_id, image_path=Path(temp.name), model=request.model, model_path=request.model_path, processor=request.processor, model_revision=request.revision, max_tokens=request.max_tokens)
-                return {"filename": filename, "caption": generated["caption"], "saved": False, "provider": request.provider, "prepared_asset": True, "template": generated["template"], "validation": generated["validation"], "attempts": generated["attempts"]}
+            if request.provider == "qwen" and (request.methodology_id or request.use_project_template):
+                methodology_id = request.methodology_id or "custom1"
+                project_trigger = str(project_store.get_project(project_id).get("trigger_word", "")).strip()
+                generated = caption_methodology_store.generate_qwen(
+                    project_id,
+                    revision_id,
+                    methodology_id,
+                    image_path=Path(temp.name),
+                    model=request.model,
+                    model_path=request.model_path,
+                    processor=request.processor,
+                    model_revision=request.revision,
+                    max_tokens=request.max_tokens,
+                    add_trigger_word=request.add_trigger_word,
+                    trigger_word=request.trigger_word.strip() or project_trigger,
+                )
+                return {
+                    "filename": filename,
+                    "caption": generated["caption"],
+                    "saved": False,
+                    "provider": request.provider,
+                    "prepared_asset": True,
+                    "methodology": generated["methodology"],
+                    "validation": generated["validation"],
+                    "attempts": generated["attempts"],
+                }
             caption = caption_service.generate(provider=request.provider, image_path=Path(temp.name), model=request.model, model_path=request.model_path, processor=request.processor, revision=request.revision, task=request.task, instruction=request.instruction, max_tokens=request.max_tokens)
         if request.add_trigger_word:
             caption = add_trigger(caption, request.trigger_word)
-        return {"filename": filename, "caption": caption, "saved": False, "provider": request.provider, "prepared_asset": True, "template": None, "validation": None, "attempts": 1}
+        return {"filename": filename, "caption": caption, "saved": False, "provider": request.provider, "prepared_asset": True, "methodology": None, "validation": None, "attempts": 1}
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
@@ -264,7 +290,7 @@ def create_run(project_id: str, request: RunCreate):
         run = project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=request.config)
         run = image_prep_store.materialize_run_dataset(project_id, request.dataset_revision, run)
         project_policy_store.materialize_for_run(project_id, request.dataset_revision, run)
-        caption_template_store.materialize_for_run(project_id, request.dataset_revision, run)
+        caption_methodology_store.materialize_for_run(project_id, request.dataset_revision, run)
         run = training_filename_store.materialize_run(project_id, request.dataset_revision, run)
         return run
     except FileNotFoundError as exc: raise _not_found(exc) from exc
