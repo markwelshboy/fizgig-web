@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getRunTelemetry,
   getTrainingStatus,
@@ -18,11 +18,20 @@ type Props = {
 };
 
 type NumericPoint = { x: number; y: number };
+type TelemetryAsset = {
+  key: string;
+  training_filename: string;
+  project_filename: string;
+  preview_url: string;
+};
+type EpochRange = { epoch: number; start: number; end: number };
+type ConsoleMode = "tail" | "show";
 
 const VIEW_W = 1000;
 const VIEW_H = 250;
 const PAD_X = 46;
 const PAD_Y = 24;
+const CAROUSEL_SIZE = 5;
 const ACTIVE_RUN_STATES = new Set(["starting", "cache_latents", "cache_text", "training"]);
 
 function finite(value: unknown): value is number {
@@ -44,8 +53,8 @@ function eventNumber(event: Record<string, unknown>, field: string) {
   return finite(value) ? value : null;
 }
 
-function scalePoints(values: number[]): { points: NumericPoint[]; min: number; max: number } {
-  if (!values.length) return { points: [], min: 0, max: 1 };
+function scaleY(values: number[]): { min: number; max: number; y: (value: number) => number } {
+  if (!values.length) return { min: 0, max: 1, y: () => VIEW_H / 2 };
   let min = Math.min(...values);
   let max = Math.max(...values);
   if (Math.abs(max - min) < 1e-12) {
@@ -57,14 +66,23 @@ function scalePoints(values: number[]): { points: NumericPoint[]; min: number; m
     min -= pad;
     max += pad;
   }
-  const innerW = VIEW_W - PAD_X * 2;
   const innerH = VIEW_H - PAD_Y * 2;
   return {
     min,
     max,
+    y: (value: number) => PAD_Y + ((max - value) / (max - min)) * innerH,
+  };
+}
+
+function indexPoints(values: number[]): { points: NumericPoint[]; min: number; max: number } {
+  const scale = scaleY(values);
+  const innerW = VIEW_W - PAD_X * 2;
+  return {
+    min: scale.min,
+    max: scale.max,
     points: values.map((value, index) => ({
       x: PAD_X + (values.length === 1 ? innerW / 2 : (index / (values.length - 1)) * innerW),
-      y: PAD_Y + ((max - value) / (max - min)) * innerH,
+      y: scale.y(value),
     })),
   };
 }
@@ -90,51 +108,157 @@ function significantDecision(snapshot: DecisionSnapshot) {
   return Object.values(snapshot.images).some((image) => ["suspect", "watch", "stuck", "exhausted", "excluded"].includes(image.verdict || ""));
 }
 
+function metricKey(row: TrainingMetric) {
+  const epoch = metricNumber(row, "epoch") ?? row.epoch;
+  const step = metricNumber(row, "step_in_epoch");
+  return step === null ? "" : `${epoch}:${step}`;
+}
+
+function chooseStepInterval(span: number, pixelWidth: number) {
+  if (span <= 0) return 1;
+  const targetLabels = Math.max(4, Math.floor(Math.max(320, pixelWidth) / 78));
+  const required = span / targetLabels;
+  const candidates = [1, 10, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+  return candidates.find((value) => value >= required) ?? candidates[candidates.length - 1];
+}
+
+function xScale(step: number, minStep: number, maxStep: number) {
+  const innerW = VIEW_W - PAD_X * 2;
+  if (maxStep <= minStep) return PAD_X + innerW / 2;
+  return PAD_X + ((step - minStep) / (maxStep - minStep)) * innerW;
+}
+
 function GlobalLossChart({ metrics, decisions, events }: { metrics: TrainingMetric[]; decisions: DecisionSnapshot[]; events: Array<Record<string, unknown>> }) {
+  const shellRef = useRef<HTMLDivElement | null>(null);
+  const [pixelWidth, setPixelWidth] = useState(900);
+  const [showEpochs, setShowEpochs] = useState(true);
+  const [showSteps, setShowSteps] = useState(true);
+
+  useEffect(() => {
+    const element = shellRef.current;
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width) setPixelWidth(width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
   const lossRows = metrics.filter((row) => row.type === "loss" && finite(row.loss_moving_average));
-  const lrRows = metrics.filter((row) => row.type === "step_context" && metricNumber(row, "lr") !== null);
+  const contextRows = metrics.filter((row) => row.type === "step_context" && metricNumber(row, "global_step") !== null);
   if (!lossRows.length) return <div className="training-chart-empty">Waiting for the first training loss observation…</div>;
 
-  const loss = scalePoints(lossRows.map((row) => row.loss_moving_average as number));
-  const lrValues = lrRows.map((row) => metricNumber(row, "lr") as number);
-  const lr = scalePoints(lrValues);
-  const adaptiveEvents = events.filter((event) => event.type === "adaptive_lr_decision" && event.changed === true);
-  const maxEpoch = Math.max(
-    1,
-    ...lossRows.map((row) => finite(row.epoch) ? row.epoch : 1),
-    ...decisions.map((row) => row.epoch),
-    ...adaptiveEvents.map((event) => eventNumber(event, "epoch") ?? 1),
-  );
-  const latestLoss = lossRows[lossRows.length - 1].loss_moving_average as number;
-  const latestLr = lrValues.length ? lrValues[lrValues.length - 1] : null;
+  const contextByEpochStep = new Map<string, TrainingMetric>();
+  contextRows.forEach((row) => {
+    const key = metricKey(row);
+    if (key) contextByEpochStep.set(key, row);
+  });
 
-  return <div className="training-chart-shell">
+  const observations = lossRows.map((row, index) => {
+    const context = contextByEpochStep.get(metricKey(row)) ?? contextRows[index];
+    const globalStep = context ? metricNumber(context, "global_step") : null;
+    return { row, context, globalStep: globalStep ?? index + 1 };
+  });
+  const minStep = Math.min(...observations.map((entry) => entry.globalStep));
+  const maxStep = Math.max(...observations.map((entry) => entry.globalStep));
+  const lossScale = scaleY(observations.map((entry) => entry.row.loss_moving_average as number));
+  const lossPoints = observations.map((entry) => ({
+    x: xScale(entry.globalStep, minStep, maxStep),
+    y: lossScale.y(entry.row.loss_moving_average as number),
+  }));
+
+  const lrRows = contextRows.filter((row) => metricNumber(row, "lr") !== null);
+  const lrValues = lrRows.map((row) => metricNumber(row, "lr") as number);
+  const lrScale = scaleY(lrValues);
+  const lrPoints = lrRows.map((row) => ({
+    x: xScale(metricNumber(row, "global_step") as number, minStep, maxStep),
+    y: lrScale.y(metricNumber(row, "lr") as number),
+  }));
+
+  const epochRanges = useMemo(() => {
+    const grouped = new Map<number, { min: number; max: number }>();
+    for (const row of contextRows) {
+      const epoch = metricNumber(row, "epoch") ?? row.epoch;
+      const step = metricNumber(row, "global_step");
+      if (step === null) continue;
+      const current = grouped.get(epoch);
+      if (current) {
+        current.min = Math.min(current.min, step);
+        current.max = Math.max(current.max, step);
+      } else grouped.set(epoch, { min: step, max: step });
+    }
+    return [...grouped.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([epoch, range]) => ({ epoch, start: range.min - 0.5, end: range.max + 0.5 } as EpochRange));
+  }, [contextRows]);
+
+  const epochEnd = new Map(epochRanges.map((range) => [range.epoch, Math.min(maxStep, range.end - 0.5)]));
+  const adaptiveEvents = events.filter((event) => event.type === "adaptive_lr_decision" && event.changed === true);
+  const latestLoss = observations[observations.length - 1].row.loss_moving_average as number;
+  const latestLr = lrValues.length ? lrValues[lrValues.length - 1] : null;
+  const stepInterval = chooseStepInterval(Math.max(1, maxStep - minStep), pixelWidth);
+  const stepLabels = new Set<number>();
+  if (showSteps) {
+    const firstRegular = Math.ceil(minStep / stepInterval) * stepInterval;
+    for (let step = firstRegular; step <= maxStep; step += stepInterval) stepLabels.add(step);
+    epochRanges.forEach((range) => stepLabels.add(Math.round(Math.min(maxStep, range.end - 0.5))));
+  }
+
+  return <div className="training-chart-shell" ref={shellRef}>
     <div className="training-chart-heading">
-      <div><strong>Global training loss</strong><small>Fizgig moving average · actual optimizer LR · direct trainer observations</small></div>
-      <div className="training-chart-stats"><span>loss <strong>{formatNumber(latestLoss)}</strong></span>{latestLr !== null && <span>LR <strong>{formatNumber(latestLr, 6)}</strong></span>}</div>
+      <div><strong>Global training loss</strong><small>Loss and LR share the same real global-step x-axis. Vertical orange markers are adaptive-LR changes; per-image decisions are small purple markers at their epoch boundary.</small></div>
+      <div className="training-chart-heading-controls">
+        <div className="training-chart-toggles">
+          <label><input type="checkbox" checked={showEpochs} onChange={(event) => setShowEpochs(event.target.checked)} /> Epochs</label>
+          <label><input type="checkbox" checked={showSteps} onChange={(event) => setShowSteps(event.target.checked)} /> Steps</label>
+        </div>
+        <div className="training-chart-stats"><span>loss <strong>{formatNumber(latestLoss)}</strong></span>{latestLr !== null && <span>LR <strong>{formatNumber(latestLr, 6)}</strong></span>}</div>
+      </div>
     </div>
     <svg className="training-chart" viewBox={`0 0 ${VIEW_W} ${VIEW_H}`} role="img" aria-label="Global training loss and learning-rate trajectory">
+      {showEpochs && epochRanges.map((range, index) => {
+        const left = xScale(Math.max(minStep, range.start), minStep, maxStep);
+        const right = xScale(Math.min(maxStep, range.end), minStep, maxStep);
+        return <g key={`epoch-band-${range.epoch}`}>
+          <rect className={`training-chart-epoch-band ${index % 2 ? "odd" : "even"}`} x={left} y={PAD_Y} width={Math.max(0, right - left)} height={VIEW_H - PAD_Y * 2} />
+          <line className="training-chart-epoch-boundary" x1={right} x2={right} y1={PAD_Y} y2={VIEW_H - PAD_Y} />
+          <text className="training-chart-epoch-label" textAnchor="end" x={right - 5} y={PAD_Y + 12}>E{range.epoch}</text>
+        </g>;
+      })}
       {[0, 1, 2, 3, 4].map((index) => {
         const y = PAD_Y + index * ((VIEW_H - PAD_Y * 2) / 4);
         return <line key={index} className="training-chart-grid-line" x1={PAD_X} x2={VIEW_W - PAD_X} y1={y} y2={y} />;
       })}
       {decisions.filter(significantDecision).map((decision) => {
-        const x = PAD_X + (decision.epoch / maxEpoch) * (VIEW_W - PAD_X * 2);
-        return <line key={`decision-${decision.epoch}`} className={`training-chart-decision-line ${decision.plateaued ? "plateau" : ""}`} x1={x} x2={x} y1={PAD_Y} y2={VIEW_H - PAD_Y}><title>{decision.plateaued ? `Plateau @ epoch ${decision.epoch}` : `Per-image loss-watch decision @ epoch ${decision.epoch}`}</title></line>;
+        const boundary = epochEnd.get(decision.epoch);
+        if (boundary === undefined) return null;
+        const x = xScale(boundary, minStep, maxStep);
+        return <g key={`decision-${decision.epoch}`} className={`training-chart-decision-marker ${decision.plateaued ? "plateau" : ""}`}>
+          <line x1={x} x2={x} y1={PAD_Y} y2={PAD_Y + 12} />
+          <circle cx={x} cy={PAD_Y + 15} r={3.5}><title>{decision.plateaued ? `Dataset plateau @ epoch ${decision.epoch}` : `Per-image loss-watch decision @ epoch ${decision.epoch}`}</title></circle>
+        </g>;
       })}
       {adaptiveEvents.map((event, index) => {
         const epoch = eventNumber(event, "epoch") ?? 1;
-        const x = PAD_X + (epoch / maxEpoch) * (VIEW_W - PAD_X * 2);
+        const boundary = epochEnd.get(epoch);
+        if (boundary === undefined) return null;
+        const x = xScale(boundary, minStep, maxStep);
         return <line key={`adaptive-${epoch}-${index}`} className="training-chart-adaptive-line" x1={x} x2={x} y1={PAD_Y} y2={VIEW_H - PAD_Y}><title>{`Adaptive LR @ epoch ${epoch}: ${String(event.action || "change")} · ${formatNumber(eventNumber(event, "before_lr") ?? 0, 6)} → ${formatNumber(eventNumber(event, "after_lr") ?? 0, 6)} · ${String(event.reason || "")}`}</title></line>;
       })}
-      <path className="training-chart-loss-line" d={pathFor(loss.points)} />
-      {lr.points.length > 1 && <path className="training-chart-lr-line" d={pathFor(lr.points)} />}
-      <text className="training-chart-axis-label" x={PAD_X} y={VIEW_H - 5}>start</text>
-      <text className="training-chart-axis-label" textAnchor="end" x={VIEW_W - PAD_X} y={VIEW_H - 5}>epoch {maxEpoch}</text>
-      <text className="training-chart-axis-label" x={5} y={PAD_Y + 4}>{formatNumber(loss.max)}</text>
-      <text className="training-chart-axis-label" x={5} y={VIEW_H - PAD_Y}>{formatNumber(loss.min)}</text>
+      <path className="training-chart-loss-line" d={pathFor(lossPoints)} />
+      {lrPoints.length > 1 && <path className="training-chart-lr-line" d={pathFor(lrPoints)} />}
+      {showSteps && [...stepLabels].sort((a, b) => a - b).map((step) => {
+        const x = xScale(step, minStep, maxStep);
+        return <g key={`step-${step}`}>
+          <line className="training-chart-step-tick" x1={x} x2={x} y1={VIEW_H - PAD_Y} y2={VIEW_H - PAD_Y + 4} />
+          <text className="training-chart-step-label" textAnchor="middle" x={x} y={VIEW_H - 5}>{step}</text>
+        </g>;
+      })}
+      <text className="training-chart-axis-label" x={5} y={PAD_Y + 4}>{formatNumber(lossScale.max)}</text>
+      <text className="training-chart-axis-label" x={5} y={VIEW_H - PAD_Y}>{formatNumber(lossScale.min)}</text>
     </svg>
-    <div className="training-chart-legend"><span className="loss">Loss MA</span>{lr.points.length > 1 && <span className="lr">Optimizer LR (normalized scale)</span>}<span className="decision">Per-image decision</span>{adaptiveEvents.length > 0 && <span className="adaptive">Adaptive LR change</span>}</div>
+    <div className="training-chart-legend"><span className="loss">Loss MA</span>{lrPoints.length > 1 && <span className="lr">Optimizer LR (normalized y-scale)</span>}<span className="decision">Per-image decision</span>{adaptiveEvents.length > 0 && <span className="adaptive">Adaptive LR change</span>}</div>
     {adaptiveEvents.length > 0 && <div className="training-decision-ribbon adaptive-ribbon">{adaptiveEvents.slice(-8).map((event, index) => {
       const epoch = eventNumber(event, "epoch") ?? 0;
       const before = eventNumber(event, "before_lr") ?? 0;
@@ -151,7 +275,7 @@ function ImageTrajectoryChart({ selectedAsset, decisions }: { selectedAsset: str
   });
   if (!rows.length) return <div className="training-chart-empty">This image does not have an epoch-boundary trajectory yet.</div>;
 
-  const scaled = scalePoints(rows.map((entry) => entry.state.mean_residual as number));
+  const scaled = indexPoints(rows.map((entry) => entry.state.mean_residual as number));
   const epochs = rows.map((entry) => entry.snapshot.epoch);
   const minEpoch = Math.min(...epochs);
   const maxEpoch = Math.max(...epochs);
@@ -199,11 +323,24 @@ function eventDetail(event: Record<string, unknown>) {
   return String(event.stage || event.time || "");
 }
 
+function verdictDisplay(verdict: string | undefined) {
+  const value = (verdict || "mid").toLowerCase();
+  if (value === "easy") return { code: "E", label: "Easy", className: "easy" };
+  if (value === "learning") return { code: "L", label: "Learning", className: "learning" };
+  if (value === "watch" || value === "suspect") return { code: "W", label: "Watch", className: "watch" };
+  if (value === "stuck") return { code: "S", label: "Stuck", className: "stuck" };
+  if (value === "exhausted" || value === "excluded" || value === "retire") return { code: "R", label: "Retire", className: "retire" };
+  return { code: "M", label: "Mid", className: "mid" };
+}
+
 export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }: Props) {
   const [telemetry, setTelemetry] = useState<TrainingTelemetry | null>(null);
   const [starting, setStarting] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedAsset, setSelectedAsset] = useState("");
+  const [browserOpen, setBrowserOpen] = useState(false);
+  const [consoleMode, setConsoleMode] = useState<ConsoleMode>("tail");
+  const consoleRef = useRef<HTMLPreElement | null>(null);
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
@@ -231,12 +368,78 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
   const assetNames = useMemo(() => {
     const names = new Set<string>(Object.keys(telemetry?.trajectories || {}));
     for (const snapshot of telemetry?.decision_history || []) Object.keys(snapshot.images || {}).forEach((name) => names.add(name));
-    return [...names].sort((a, b) => a.localeCompare(b));
+    return [...names].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
   }, [telemetry]);
+
+  const telemetryAssets = ((telemetry as (TrainingTelemetry & { assets?: TelemetryAsset[] }) | null)?.assets ?? []);
+  const assetMetadata = useMemo(() => new Map(telemetryAssets.map((asset) => [asset.key, asset])), [telemetryAssets]);
+  const selectedIndex = selectedAsset ? assetNames.indexOf(selectedAsset) : -1;
+  const carouselAssets = useMemo(() => {
+    if (!assetNames.length || selectedIndex < 0) return [];
+    const count = Math.min(CAROUSEL_SIZE, assetNames.length);
+    const radius = Math.floor(count / 2);
+    return Array.from({ length: count }, (_, offset) => assetNames[(selectedIndex + offset - radius + assetNames.length) % assetNames.length]);
+  }, [assetNames, selectedIndex]);
 
   useEffect(() => {
     if (!selectedAsset || !assetNames.includes(selectedAsset)) setSelectedAsset(assetNames[0] || "");
   }, [assetNames, selectedAsset]);
+
+  const consoleLastLine = telemetry?.console_tail?.[telemetry.console_tail.length - 1] ?? "";
+  useEffect(() => {
+    if (consoleMode !== "tail") return;
+    const frame = window.requestAnimationFrame(() => {
+      const element = consoleRef.current;
+      if (element) element.scrollTop = element.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [consoleMode, consoleLastLine]);
+
+  function navigateAsset(delta: number) {
+    if (!assetNames.length || selectedIndex < 0) return;
+    setSelectedAsset(assetNames[(selectedIndex + delta + assetNames.length) % assetNames.length]);
+  }
+
+  function latestStateFor(name: string) {
+    for (let index = (telemetry?.decision_history.length || 0) - 1; index >= 0; index -= 1) {
+      const state = telemetry?.decision_history[index]?.images[name];
+      if (state) return state;
+    }
+    return undefined;
+  }
+
+  function AssetThumb({ name, compact = false }: { name: string; compact?: boolean }) {
+    const metadata = assetMetadata.get(name);
+    const state = latestStateFor(name);
+    const verdict = verdictDisplay(state?.verdict);
+    const effective = decisionNumber(state ?? {}, "multiplier") ?? 1;
+    const selected = name === selectedAsset;
+    return <button
+      type="button"
+      className={`training-trajectory-thumb ${compact ? "compact" : ""} ${selected ? "selected" : ""} verdict-${verdict.className}`}
+      onClick={() => setSelectedAsset(name)}
+      title={`${metadata?.training_filename || name} · ${verdict.label} · effective LR ×${effective.toFixed(2)}`}
+    >
+      <span className="training-trajectory-thumb-image">
+        {metadata?.preview_url ? <img src={metadata.preview_url} alt={metadata.training_filename || name} /> : <span className="training-trajectory-thumb-placeholder">{name.slice(-3)}</span>}
+        <span className="training-trajectory-state-letter">{verdict.code}</span>
+        <span className="training-trajectory-effective">×{effective.toFixed(2)}</span>
+      </span>
+      {!compact && <span className="training-trajectory-thumb-name">{metadata?.training_filename || name}</span>}
+    </button>;
+  }
+
+  function toggleConsoleMode() {
+    if (consoleMode === "tail") {
+      setConsoleMode("show");
+      return;
+    }
+    setConsoleMode("tail");
+    window.requestAnimationFrame(() => {
+      const element = consoleRef.current;
+      if (element) element.scrollTop = element.scrollHeight;
+    });
+  }
 
   async function onStart() {
     setStarting(true);
@@ -284,9 +487,17 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
     <GlobalLossChart metrics={telemetry?.metrics || []} decisions={telemetry?.decision_history || []} events={telemetry?.events || []} />
 
     <div className="training-trajectory-toolbar">
-      <div><strong>Individual trajectory</strong><small>Uses Fizgig's epoch-boundary normalized residual, rather than comparing raw diffusion loss across unrelated timesteps.</small></div>
-      <label>Asset<select value={selectedAsset} disabled={!assetNames.length} onChange={(event) => setSelectedAsset(event.target.value)}>{assetNames.length ? assetNames.map((name) => <option key={name} value={name}>{name}</option>) : <option value="">Waiting for images…</option>}</select></label>
+      <div><strong>Individual trajectory</strong><small>Uses Fizgig's epoch-boundary normalized residual, rather than comparing raw diffusion loss across unrelated timesteps. Thumbnail letters show the latest state; the small value is the effective LR multiplier.</small></div>
+      <div className="training-trajectory-navigator">
+        <button type="button" className="training-trajectory-browser-toggle" onClick={() => setBrowserOpen((open) => !open)} aria-expanded={browserOpen}><span>{browserOpen ? "Hide dataset" : `Browse all ${assetNames.length}`}</span><span className={`caption-browser-chevron ${browserOpen ? "open" : ""}`}>⌄</span></button>
+        <div className="training-trajectory-carousel-row">
+          <button type="button" className="training-trajectory-arrow" onClick={() => navigateAsset(-1)} disabled={assetNames.length < 2} aria-label="Previous training asset">‹</button>
+          <div className="training-trajectory-carousel-strip">{carouselAssets.map((name) => <AssetThumb key={name} name={name} compact />)}</div>
+          <button type="button" className="training-trajectory-arrow" onClick={() => navigateAsset(1)} disabled={assetNames.length < 2} aria-label="Next training asset">›</button>
+        </div>
+      </div>
     </div>
+    {browserOpen && <div className="training-trajectory-browser"><div className="training-trajectory-browser-grid">{assetNames.map((name) => <AssetThumb key={name} name={name} />)}</div></div>}
     {selectedAsset ? <ImageTrajectoryChart selectedAsset={selectedAsset} decisions={telemetry?.decision_history || []} /> : <div className="training-chart-empty">Per-image trajectories appear after Fizgig has enough observations to classify the dataset.</div>}
 
     {latestDecision && latestState && <div className="training-current-decision">
@@ -304,7 +515,15 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
 
     <div className="training-runtime-details">
       <div className="training-event-list"><strong>Recent run events</strong>{eventRows.length ? eventRows.map((event, index) => <div key={`${String(event.time || "")}-${index}`}><span>{String(event.type || "event")}</span><small title={String(event.reason || "")}>{eventDetail(event)}</small></div>) : <span className="muted">No run events yet.</span>}</div>
-      <details className="training-console-tail"><summary>Persistent console tail</summary><pre>{telemetry?.console_tail.length ? telemetry.console_tail.join("\n") : "No console output yet."}</pre></details>
+      <div className="training-console-tail">
+        <div className="training-console-heading"><strong>Persistent console tail</strong><button type="button" className={`training-console-mode ${consoleMode}`} onClick={toggleConsoleMode} title={consoleMode === "tail" ? "Stop following the live tail" : "Follow the live tail and jump to the newest output"}>{consoleMode.toUpperCase()}</button></div>
+        <pre ref={consoleRef} onScroll={(event) => {
+          if (consoleMode !== "tail") return;
+          const element = event.currentTarget;
+          const atBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 20;
+          if (!atBottom) setConsoleMode("show");
+        }}>{telemetry?.console_tail.length ? telemetry.console_tail.join("\n") : "No console output yet."}</pre>
+      </div>
     </div>
   </section>;
 }
