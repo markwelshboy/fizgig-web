@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { downloadQwenModel, getModelDownload, getPreferences, savePreferences, type Preferences } from "../api";
+import { CaptionMethodologySettings } from "../components/CaptionMethodologySettings";
 
 const DEFAULTS: Preferences = {
   qwen_caption_model: "Qwen/Qwen3-VL-8B-Instruct",
@@ -129,6 +130,8 @@ export function PreferencesPage() {
         </section>
       </div>
 
+      <CaptionMethodologySettings />
+
       <div className="grid-2">
         <section className="panel stack" id="training-models">
           <div className="card-title">Training Models</div>
@@ -138,7 +141,7 @@ export function PreferencesPage() {
         <section className="panel stack">
           <div className="card-title">Caption Provider Behavior</div>
           <p className="muted">The Captions page can override the saved Qwen model, processor, and revision for an individual run without changing these defaults.</p>
-          <p className="muted">Switching caption models automatically causes the previous model to be unloaded on the next request, so a 4B, 8B, fine-tune, or local checkpoint can be swapped without affecting the trainer.</p>
+          <p className="muted">Built-in Qwen methodologies remain unmodified baselines. Custom 1–3 and the automatic rewrite ladder are configured above and snapshotted into each prepared training run.</p>
         </section>
       </div>
     </div>
