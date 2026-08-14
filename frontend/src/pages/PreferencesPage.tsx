@@ -81,6 +81,11 @@ function formatBytes(value: number | undefined) {
   return gb >= 1 ? `${gb.toFixed(1)} GB` : `${(value / (1024 ** 2)).toFixed(0)} MB`;
 }
 
+function formatGigabytes(value: number) {
+  if (value < 1) return value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return value.toFixed(1).replace(/\.0$/, "");
+}
+
 export function PreferencesPage() {
   const [tab, setTab] = useState<PreferenceTab>(() => tabFromHash());
   const [prefs, setPrefs] = useState<AppPreferences>(DEFAULTS);
@@ -124,6 +129,10 @@ export function PreferencesPage() {
   }, [trainingJob]);
 
   function patch<K extends keyof AppPreferences>(key: K, value: AppPreferences[K]) {
+    setPrefs((current) => ({ ...current, [key]: value }));
+  }
+
+  function patchString(key: keyof AppPreferences, value: string) {
     setPrefs((current) => ({ ...current, [key]: value }));
   }
 
@@ -265,9 +274,9 @@ export function PreferencesPage() {
             {family.gated && <div className="notice">Klein uses gated Black Forest Labs repositories. Accept the model licences on Hugging Face and provide <code>HF_TOKEN</code> to the pod before downloading.</div>}
             <div className="training-model-assets">
               {family.assets.map((asset) => <div className={`training-model-asset ${asset.exists ? "ready" : "missing"}`} key={asset.key}>
-                <div><strong>{asset.label}</strong><small>{asset.core ? "Training core" : "Preview / workbench support"} · ~{asset.size_gb:g} GB · {asset.filename}</small></div>
+                <div><strong>{asset.label}</strong><small>{asset.core ? "Training core" : "Preview / workbench support"} · ~{formatGigabytes(asset.size_gb)} GB · {asset.filename}</small></div>
                 <span>{asset.exists ? "Found" : "Missing"}</span>
-                <input value={String(prefs[asset.key as keyof AppPreferences] ?? asset.path ?? "")} onChange={(event) => patch(asset.key as keyof AppPreferences, event.target.value as never)} placeholder={asset.filename} />
+                <input value={String(prefs[asset.key as keyof AppPreferences] ?? asset.path ?? "")} onChange={(event) => patchString(asset.key as keyof AppPreferences, event.target.value)} placeholder={asset.filename} />
               </div>)}
             </div>
             <div className="actions">
