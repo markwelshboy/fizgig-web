@@ -176,7 +176,7 @@ function GlobalLossChart({ metrics, decisions, events }: { metrics: TrainingMetr
     y: lrScale.y(metricNumber(row, "lr") as number),
   }));
 
-  const epochRanges = useMemo(() => {
+  const epochRanges = (() => {
     const grouped = new Map<number, { min: number; max: number }>();
     for (const row of contextRows) {
       const epoch = metricNumber(row, "epoch") ?? row.epoch;
@@ -191,7 +191,7 @@ function GlobalLossChart({ metrics, decisions, events }: { metrics: TrainingMetr
     return [...grouped.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([epoch, range]) => ({ epoch, start: range.min - 0.5, end: range.max + 0.5 } as EpochRange));
-  }, [contextRows]);
+  })();
 
   const epochEnd = new Map(epochRanges.map((range) => [range.epoch, Math.min(maxStep, range.end - 0.5)]));
   const adaptiveEvents = events.filter((event) => event.type === "adaptive_lr_decision" && event.changed === true);
