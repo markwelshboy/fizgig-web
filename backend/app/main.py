@@ -112,6 +112,21 @@ class PreferencesUpdate(BaseModel):
     qwen_caption_processor: str | None = None
     qwen_caption_revision: str | None = None
     caption_model_dir: str | None = None
+    training_model_dir: str | None = None
+    krea2_raw_dit: str | None = None
+    krea2_text_encoder: str | None = None
+    krea2_vae: str | None = None
+    krea2_turbo_lora: str | None = None
+    krea2_turbo_dit: str | None = None
+    base_dit: str | None = None
+    text_encoder: str | None = None
+    vae: str | None = None
+    distilled_dit: str | None = None
+    log_with: str | None = None
+    wandb_api_key: str | None = None
+    wandb_entity: str | None = None
+    wandb_project: str | None = None
+    wandb_run_pattern: str | None = None
 
 
 class ModelDownloadRequest(BaseModel):
@@ -119,6 +134,10 @@ class ModelDownloadRequest(BaseModel):
     revision: str = ""
     model_dir: str = ""
     use_as_qwen_caption_model: bool = True
+
+
+class TrainingModelDownloadRequest(BaseModel):
+    model_dir: str = ""
 
 
 def _dataset_id(path: Path) -> str:
@@ -203,14 +222,9 @@ def get_preferences() -> dict[str, str]:
 
 @app.put("/api/preferences")
 def update_preferences(update: PreferencesUpdate) -> dict[str, str]:
-    current = save_settings(update.model_dump(exclude_none=True))
+    save_settings(update.model_dump(exclude_none=True))
     caption_service.unload()
-    return {
-        "qwen_caption_model": current.qwen_caption_model,
-        "qwen_caption_processor": current.qwen_caption_processor,
-        "qwen_caption_revision": current.qwen_caption_revision,
-        "caption_model_dir": current.caption_model_dir,
-    }
+    return settings_dict()
 
 
 @app.post("/api/models/qwen/download", status_code=202)
@@ -222,6 +236,21 @@ def download_qwen_model(request: ModelDownloadRequest) -> dict[str, object]:
             model_dir=request.model_dir,
             select_when_complete=request.use_as_qwen_caption_model,
         )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@app.get("/api/training-models")
+def training_model_state() -> dict[str, object]:
+    return model_download_manager.training_state()
+
+
+@app.post("/api/training-models/{family}/download", status_code=202)
+def download_training_models(family: str, request: TrainingModelDownloadRequest) -> dict[str, object]:
+    try:
+        return model_download_manager.start_training_family(family=family, model_dir=request.model_dir)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RuntimeError as exc:
