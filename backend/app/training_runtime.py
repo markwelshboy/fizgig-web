@@ -91,11 +91,11 @@ class TrainingRuntime:
         return {"run": run, "worker_alive": alive}
 
     def start(self, project_id: str, run_id: str) -> dict[str, Any]:
-        run, run_dir, _ = self._run_paths(project_id, run_id)
+        run, _, _ = self._run_paths(project_id, run_id)
         if run.get("model_family") != "krea2":
             raise ValueError("Observer-first trainer wiring currently supports Krea 2 only")
-        if run.get("status") not in {"prepared", "failed"}:
-            raise ValueError(f"Run is already {run.get('status', 'active')}")
+        if run.get("status") != "prepared":
+            raise ValueError(f"Only a prepared run can be started; this run is {run.get('status', 'unknown')}")
 
         batch_size = int(run.get("config", {}).get("dataset", {}).get("batch_size", 1) or 1)
         if batch_size != 1:
@@ -106,6 +106,17 @@ class TrainingRuntime:
             existing = self._threads.get(key)
             if existing and existing.is_alive():
                 raise ValueError("Run worker is already active")
+            # Publish STARTING before returning from the API. That makes the browser's first
+            # response authoritative and guarantees its live polling starts even if the worker
+            # thread has not reached Python scheduling yet.
+            self._set_status(
+                project_id,
+                run_id,
+                "starting",
+                started_at=_now(),
+                software=software_snapshot(),
+                telemetry_mode="observation_only",
+            )
             worker = threading.Thread(target=self._worker, args=(project_id, run_id), daemon=True, name=f"fizgig-{run_id}")
             self._threads[key] = worker
             worker.start()
@@ -243,8 +254,7 @@ class TrainingRuntime:
     def _worker(self, project_id: str, run_id: str) -> None:
         try:
             run, run_dir, _ = self._run_paths(project_id, run_id)
-            software = software_snapshot()
-            run = self._set_status(project_id, run_id, "starting", started_at=_now(), software=software, telemetry_mode="observation_only")
+            software = run.get("software") or software_snapshot()
             commands = self._commands(run, run_dir)
             _write_json(run_dir / "commands.json", {"created_at": _now(), "commands": [{"stage": stage, "argv": argv} for stage, argv in commands]})
             _append_jsonl(run_dir / "events.jsonl", {"time": _now(), "type": "training_baseline_started", "software": software, "mode": "observation_only"})
