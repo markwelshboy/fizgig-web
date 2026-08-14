@@ -67,3 +67,7 @@ export function downloadTrainingModelFamily(family: string, modelDir: string) {
     body: JSON.stringify({ model_dir: modelDir }),
   });
 }
+
+export function getTrainingModelDownload(jobId: string) {
+  return api<TrainingModelDownloadJob>(`/api/models/downloads/${encodeURIComponent(jobId)}`);
+}
