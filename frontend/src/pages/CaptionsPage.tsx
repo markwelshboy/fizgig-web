@@ -63,6 +63,17 @@ function replaceFirstWord(text: string, word: string, replacement: string) {
   return text.replace(new RegExp(`\\b${escaped}\\b`, "i"), replacement);
 }
 
+function protectedPhraseMatches(text: string, phrases: string[]) {
+  return phrases.filter((phrase) => {
+    const words = phrase.trim().split(/\s+/).filter(Boolean);
+    if (!words.length) return false;
+    const body = words
+      .map((word) => word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+      .join("\\s+");
+    return new RegExp(`(^|[^A-Za-z0-9])${body}(?=$|[^A-Za-z0-9])`, "i").test(text);
+  });
+}
+
 function SpellingSummary({ result, onReplace }: { result: CaptionSpellcheckResult | null; onReplace?: (word: string, replacement: string) => void }) {
   if (!result?.enabled || !result.issues.length) return null;
   return <div className="caption-spelling-summary" role="status">
@@ -176,14 +187,14 @@ export function CaptionsPage() {
     ? { training_policy: "automatic" as AssetTrainingPolicy, auto_recaption_policy: "automatic" as AutoRecaptionPolicy, ...(policy?.assets[selectedAsset.filename] ?? {}) }
     : null;
   const captionChanged = Boolean(selectedAsset && captionDraft !== selectedAsset.caption);
-  const protectedMatches = useMemo(() => {
-    const haystack = captionDraft.toLowerCase();
-    return (policy?.caption_validation.protected_phrases ?? []).filter((phrase) => phrase && haystack.includes(phrase.toLowerCase()));
-  }, [captionDraft, policy]);
-  const candidateProtectedMatches = useMemo(() => {
-    const haystack = aiCandidate.toLowerCase();
-    return (policy?.caption_validation.protected_phrases ?? []).filter((phrase) => phrase && haystack.includes(phrase.toLowerCase()));
-  }, [aiCandidate, policy]);
+  const protectedMatches = useMemo(
+    () => protectedPhraseMatches(captionDraft, policy?.caption_validation.protected_phrases ?? []),
+    [captionDraft, policy],
+  );
+  const candidateProtectedMatches = useMemo(
+    () => protectedPhraseMatches(aiCandidate, policy?.caption_validation.protected_phrases ?? []),
+    [aiCandidate, policy],
+  );
   const policyDirty = useMemo(() => {
     if (!policy) return false;
     return !sameList(parsePolicyList(protectedDraft), policy.caption_validation.protected_phrases)
