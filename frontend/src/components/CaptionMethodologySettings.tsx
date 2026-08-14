@@ -123,13 +123,20 @@ export function CaptionMethodologySettings() {
   const variables = projectVariables ?? EXAMPLE_VARIABLES;
   const rendered = renderInstruction(selected.instruction, variables);
   const baselineOptions = saved.builtins;
+  const triggerValidationEnabled = Boolean(selected.validation && (
+    selected.validation.require_exact_trigger
+    || selected.validation.require_trigger_first
+    || selected.validation.require_single_trigger
+    || selected.validation.reject_detached_trailing_trigger
+    || selected.validation.reject_generic_subject_after_trigger
+  ));
 
   return <section className="panel stack methodology-settings-panel" id="caption-methodologies">
     <div className="methodology-heading">
       <div>
         <p className="eyebrow">Caption Methodologies</p>
         <div className="card-title">Baseline controls + three custom experiments</div>
-        <p className="muted">Built-in Qwen tasks are deliberately left unchanged so they remain valid controls. Custom 1–3 are reusable prompt methodologies with project variables and optional output validation.</p>
+        <p className="muted">Built-in Qwen tasks are deliberately left unchanged so they remain valid controls. Custom 1–3 are reusable prompt methodologies with project variables and independently configurable output contracts.</p>
       </div>
       <button className="primary" type="button" onClick={save} disabled={busy || !dirty}>{busy ? "Saving…" : "Save Methodologies"}</button>
     </div>
@@ -163,14 +170,21 @@ export function CaptionMethodologySettings() {
         </div>
         <p className="muted">{projectVariables ? `Preview variables are resolved from ${project?.name}.` : "No project is open, so the preview uses example identity variables."}</p>
 
-        {selected.validation && <div className="methodology-validation-grid">
-          <label className="inline-check"><input type="checkbox" checked={selected.validation.require_trigger_first} onChange={(event) => patchValidation("require_trigger_first", event.target.checked)} /> Trigger must be first</label>
-          <label className="inline-check"><input type="checkbox" checked={selected.validation.require_single_trigger} onChange={(event) => patchValidation("require_single_trigger", event.target.checked)} /> Trigger exactly once</label>
-          <label className="inline-check"><input type="checkbox" checked={selected.validation.reject_detached_trailing_trigger} onChange={(event) => patchValidation("reject_detached_trailing_trigger", event.target.checked)} /> Reject trailing trigger</label>
-          <label className="inline-check"><input type="checkbox" checked={selected.validation.reject_generic_subject_after_trigger} onChange={(event) => patchValidation("reject_generic_subject_after_trigger", event.target.checked)} /> Reject “trigger, a woman/person…”</label>
-          <label className="inline-check"><input type="checkbox" checked={selected.validation.retry_on_failure} onChange={(event) => patchValidation("retry_on_failure", event.target.checked)} /> Retry invalid structure</label>
-          <label>Max attempts<input type="number" min={1} max={5} disabled={!selected.validation.retry_on_failure} value={selected.validation.max_attempts} onChange={(event) => patchValidation("max_attempts", Math.max(1, Math.min(5, Number(event.target.value) || 1)))} /></label>
-        </div>}
+        {selected.validation && <>
+          <div className="methodology-validation-grid">
+            <label className="inline-check"><input type="checkbox" checked={selected.validation.require_exact_trigger} onChange={(event) => patchValidation("require_exact_trigger", event.target.checked)} /> Require exact trigger</label>
+            <label className="inline-check"><input type="checkbox" checked={selected.validation.require_trigger_first} onChange={(event) => patchValidation("require_trigger_first", event.target.checked)} /> Trigger must be first</label>
+            <label className="inline-check"><input type="checkbox" checked={selected.validation.require_single_trigger} onChange={(event) => patchValidation("require_single_trigger", event.target.checked)} /> Trigger exactly once</label>
+            <label className="inline-check"><input type="checkbox" checked={selected.validation.reject_detached_trailing_trigger} onChange={(event) => patchValidation("reject_detached_trailing_trigger", event.target.checked)} /> Reject trailing trigger</label>
+            <label className="inline-check"><input type="checkbox" checked={selected.validation.reject_generic_subject_after_trigger} onChange={(event) => patchValidation("reject_generic_subject_after_trigger", event.target.checked)} /> Reject “trigger, a woman/person…”</label>
+            <label className="inline-check"><input type="checkbox" checked={selected.validation.retry_on_failure} onChange={(event) => patchValidation("retry_on_failure", event.target.checked)} /> Retry invalid structure</label>
+            <label>Max attempts<input type="number" min={1} max={5} disabled={!selected.validation.retry_on_failure} value={selected.validation.max_attempts} onChange={(event) => patchValidation("max_attempts", Math.max(1, Math.min(5, Number(event.target.value) || 1)))} /></label>
+          </div>
+          <div className="methodology-contract-note">
+            <strong>{triggerValidationEnabled ? "Trigger contract enabled." : "No trigger contract."}</strong>
+            <span>{triggerValidationEnabled ? "This Custom methodology requires a configured project trigger and validates the generated output." : "Useful for deliberately unconstrained experiments. If the prompt itself contains [TRIGGER], the project still needs a trigger so the variable can be rendered."}</span>
+          </div>
+        </>}
 
         <button className="methodology-preview-toggle" type="button" onClick={() => setRenderedOpen((open) => !open)}><span><strong>Rendered Prompt Preview</strong><small>what Qwen receives after variable substitution</small></span><span>{renderedOpen ? "⌃" : "⌄"}</span></button>
         {renderedOpen && <pre className="methodology-rendered-prompt">{rendered || "This custom methodology has no prompt yet."}</pre>}
