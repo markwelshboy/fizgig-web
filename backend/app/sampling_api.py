@@ -10,8 +10,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .projects import project_store
+from .training_runtime import training_runtime
+from .training_telemetry import snapshot as training_telemetry_snapshot
 
-router = APIRouter(prefix="/api/projects", tags=["sampling"])
+router = APIRouter(prefix="/api/projects", tags=["sampling", "training"])
 
 
 def _now() -> str:
@@ -102,3 +104,31 @@ def update_sampling_plan(project_id: str, request: SamplingPlan):
         enabled=value["enabled"],
     )
     return value
+
+
+@router.post("/{project_id}/runs/{run_id}/training/start")
+def start_training(project_id: str, run_id: str):
+    try:
+        return training_runtime.start(project_id, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}/runs/{run_id}/training/status")
+def training_status(project_id: str, run_id: str):
+    try:
+        return training_runtime.status(project_id, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}/runs/{run_id}/telemetry")
+def training_telemetry(project_id: str, run_id: str):
+    try:
+        return training_telemetry_snapshot(project_id, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
