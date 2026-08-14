@@ -134,7 +134,16 @@ export function CaptionsPage() {
   const qwenMethods = methodologies ? [...methodologies.builtins, ...methodologies.customs] : [];
   const activeMethodology = qwenMethods.find((method) => method.id === methodologyId);
   const customMethodology = provider === "qwen" && activeMethodology?.kind === "custom";
-  const generationNeedsTrigger = customMethodology || addTriggerWord;
+  const customTriggerRules = customMethodology && activeMethodology?.validation ? (
+    activeMethodology.validation.require_exact_trigger
+    || activeMethodology.validation.require_trigger_first
+    || activeMethodology.validation.require_single_trigger
+    || activeMethodology.validation.reject_detached_trailing_trigger
+    || activeMethodology.validation.reject_generic_subject_after_trigger
+  ) : false;
+  const customPromptUsesTrigger = Boolean(customMethodology && activeMethodology?.instruction.includes("[TRIGGER]"));
+  const customNeedsTrigger = Boolean(customMethodology && (customTriggerRules || customPromptUsesTrigger));
+  const generationNeedsTrigger = provider === "qwen" && customMethodology ? customNeedsTrigger : addTriggerWord;
   const generationBlockedByTrigger = Boolean(generationNeedsTrigger && (triggerPending || !triggerConfigured));
 
   const trainingNameMaps = useMemo(() => {
@@ -615,7 +624,7 @@ export function CaptionsPage() {
           <button className="secondary" onClick={saveTriggerWord} disabled={triggerSaving || !triggerPending}>{triggerSaving ? "Saving…" : "Save trigger word"}</button>
         </div>
       </div>
-      {!triggerConfigured && <div className="caption-trigger-unset"><strong>No project trigger word is configured.</strong> Baseline Qwen captions can run without one if Add trigger is off; Custom methodologies that use identity variables require it.</div>}
+      {!triggerConfigured && <div className="caption-trigger-unset"><strong>No project trigger word is configured.</strong> Baseline Qwen captions can run without one if Add trigger is off; Custom methodologies only require it when their prompt or validation contract uses the trigger.</div>}
       <div className="form-row">
         <label>Protected traits / phrases<textarea value={protectedDraft} onChange={(event) => setProtectedDraft(event.target.value)} placeholder={"blonde hair\nblue eyes"} /><span className="muted">One per line or comma-separated.</span></label>
         <label>Accepted spellings<textarea value={acceptedWordsDraft} onChange={(event) => setAcceptedWordsDraft(event.target.value)} placeholder={"LoKR\nWelsh\nproduct-name"} /><span className="muted">Project dictionary for intentional words spellcheck should ignore. One per line or comma-separated.</span></label>
@@ -652,7 +661,7 @@ export function CaptionsPage() {
         </div>
         <div className="caption-ai-action-row">
           {provider === "qwen" && customMethodology
-            ? <span className="caption-methodology-binding-note">Trigger binding and validation are defined by <strong>{activeMethodology?.name}</strong>.</span>
+            ? <span className="caption-methodology-binding-note">Output behavior is defined by <strong>{activeMethodology?.name}</strong>{customNeedsTrigger ? " · project trigger required" : " · no trigger required"}.</span>
             : <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord && Boolean(triggerWord.trim())} disabled={!triggerWord.trim()} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord.trim() || "set above"})</span></label>}
           {provider === "qwen" && <button className="secondary caption-methodology-settings-link" type="button" onClick={() => navigate("/preferences#caption-methodologies")}>Configure methodologies</button>}
           {modelLoaded && <span className="caption-model-loaded-note">Loaded: {captionRuntime?.loaded.map(providerLabel).join(" + ")}</span>}
