@@ -14,12 +14,15 @@ each launched run expose that SHA alongside the `fizgig-web` image/VCS identity.
 
 ## Why the overlay is baseline-sensitive
 
-The first telemetry pass adds only three observer hook points:
+The first telemetry pass touches only three upstream files, with four observer callbacks:
 
 1. `training/train_utils.py` — after `LossRecorder` accepts the loss already used by Fizgig.
 2. `krea2/trainer.py` — beside the existing per-image observation, where asset, timestep and the
    optimizer's current LR are already known.
-3. `training/loss_logger.py` — after Fizgig has made its epoch-boundary loss-watch classifications.
+3. `krea2/trainer.py` — after the stock adaptive-LR watcher has already made/logged its epoch
+   decision, to record the action, reason, before/after LR and weight growth.
+4. `training/loss_logger.py` — after Fizgig has made its epoch-boundary per-image loss-watch
+   classifications.
 
 The hooks write JSONL and swallow their own failures. They do not modify the loss, gradient,
 optimizer, sampling order, caption, cache, dataset, or policy state.
@@ -33,7 +36,8 @@ changed.
 When adopting a newer upstream Fizgig version:
 
 1. Record the old and proposed upstream SHAs.
-2. Review upstream changes to the three hook sites and to the Krea 2 cache/train CLIs.
+2. Review upstream changes to the three touched files/four callback locations and to the Krea 2
+   cache/train CLIs.
 3. Reapply the observer hooks at the semantically equivalent locations; do not broaden them into
    training behavior changes during the rebaseline.
 4. Update the pinned SHA in `Dockerfile.runpod`, `build_fizgig-web.sh`, and
@@ -85,7 +89,7 @@ per-image loss watch for observation, but does **not** enable:
 
 `decision_history.jsonl` records both Fizgig's analytical verdict and the multiplier it would
 recommend. The effective per-image multiplier remains `1.0` in the observer baseline. Global
-adaptive LR is allowed because it is ordinary Fizgig training behavior; the actual optimizer LR is
-recorded so its changes are visible on the global chart.
+adaptive LR is allowed because it is ordinary Fizgig training behavior; the actual optimizer LR
+and each adaptive-LR change decision are recorded so the tuning is visible on the global chart.
 
 Do not enable trajectory-shaping controls until the A/B baseline is accepted.
