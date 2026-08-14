@@ -183,6 +183,8 @@ def health() -> dict[str, str]:
 @app.get("/api/runtime")
 def runtime_status() -> dict[str, object]:
     """Small deployment probe for GPU pods before a model is loaded."""
+    from .runtime_info import software_snapshot
+
     result: dict[str, object] = {
         "python": platform.python_version(),
         "workspace": str(Path("/workspace").resolve()),
@@ -190,6 +192,7 @@ def runtime_status() -> dict[str, object]:
         "projects_root": os.environ.get("FIZGIG_PROJECTS_ROOT", ""),
         "fizgig_root": os.environ.get("FIZGIG_ROOT", ""),
         "static_dir": os.environ.get("FIZGIG_WEB_STATIC_DIR", ""),
+        "software": software_snapshot(),
     }
     try:
         import torch
