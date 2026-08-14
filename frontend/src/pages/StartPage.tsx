@@ -4,8 +4,19 @@ import { createProject, createProjectRevision, getProjectRevision, importProject
 import { useSession } from "../session";
 
 const DISMISSED_RECENTS_KEY = "fizgig.dismissedRecentProjects";
+const PROJECT_NAME_ADJECTIVES = ["fine", "bright", "quiet", "swift", "silver", "mellow", "clever", "vivid", "gentle", "lucky", "crisp", "bold", "calm", "happy", "sunny", "brisk", "soft", "wise", "kind", "rapid", "tidy", "steady", "golden", "nimble"];
+const PROJECT_NAME_CREATURES = ["unicorn", "otter", "badger", "raven", "heron", "llama", "panda", "fox", "gecko", "falcon", "rabbit", "tiger", "koala", "orca", "finch", "beaver", "lynx", "yak", "wombat", "penguin", "dolphin", "moose", "puffin", "dragon"];
+const PROJECT_NAME_THINGS = ["potatoes", "lantern", "meadow", "harbor", "comet", "pebble", "canyon", "orchard", "anchor", "rocket", "forest", "island", "thunder", "walnut", "sunset", "river", "maple", "compass", "pocket", "castle", "cloud", "acorn", "ember", "garden"];
 function readDismissedRecents() { try { const value = JSON.parse(localStorage.getItem(DISMISSED_RECENTS_KEY) || "[]"); return new Set<string>(Array.isArray(value) ? value : []); } catch { return new Set<string>(); } }
 function workingDatasetCount(project: ProjectInfo) { return project.dataset_revisions.filter((entry) => entry.model_family !== "generic").length; }
+function randomItem(values: string[]) { return values[Math.floor(Math.random() * values.length)]; }
+function makeProjectName(existing: Set<string> = new Set()) {
+  for (let attempt = 0; attempt < 48; attempt += 1) {
+    const candidate = `${randomItem(PROJECT_NAME_ADJECTIVES)}_${randomItem(PROJECT_NAME_CREATURES)}_${randomItem(PROJECT_NAME_THINGS)}`;
+    if (!existing.has(candidate.toLowerCase())) return candidate;
+  }
+  return `${randomItem(PROJECT_NAME_ADJECTIVES)}_${randomItem(PROJECT_NAME_CREATURES)}_${randomItem(PROJECT_NAME_THINGS)}${Math.floor(Math.random() * 1000)}`;
+}
 
 function wildcardMatches(filename: string, pattern: string) {
   const value = pattern.trim() || "*";
@@ -18,10 +29,13 @@ export function StartPage() {
   const navigate = useNavigate();
   const sourceArchiveInput = useRef<HTMLInputElement | null>(null);
   const projectArchiveInput = useRef<HTMLInputElement | null>(null);
+  const projectNameInput = useRef<HTMLInputElement | null>(null);
   const { project, setProject, revision, setRevision, setRun, dataset, setDataset, modelFamily, setModelFamily, triggerWord, setTriggerWord } = useSession();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [dismissedRecents, setDismissedRecents] = useState<Set<string>>(() => readDismissedRecents());
-  const [projectName, setProjectName] = useState("");
+  const [projectName, setProjectName] = useState(() => makeProjectName());
+  const [projectNameEditable, setProjectNameEditable] = useState(false);
+  const [projectDescription, setProjectDescription] = useState("");
   const [sourcePath, setSourcePath] = useState("/workspace/sources/5H1VY");
   const [sourceInfo, setSourceInfo] = useState<DatasetInfo | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -31,7 +45,13 @@ export function StartPage() {
   const [error, setError] = useState("");
   const [transferMessage, setTransferMessage] = useState("");
 
-  useEffect(() => { listProjects().then(setProjects).catch(() => undefined); }, []);
+  useEffect(() => {
+    listProjects().then((items) => {
+      setProjects(items);
+      const existingNames = new Set(items.map((item) => item.name.trim().toLowerCase()));
+      setProjectName((current) => existingNames.has(current.trim().toLowerCase()) ? makeProjectName(existingNames) : current);
+    }).catch(() => undefined);
+  }, []);
   const recentProjects = useMemo(() => projects.filter((item) => !dismissedRecents.has(item.id)), [projects, dismissedRecents]);
   const duplicateName = projectName.trim() && projects.some((item) => item.name.trim().toLowerCase() === projectName.trim().toLowerCase());
   const selectedImages = sourceInfo?.images.filter((image) => selected.has(image.filename)) ?? [];
@@ -42,6 +62,13 @@ export function StartPage() {
   function restoreRecent(projectId: string) { if (!dismissedRecents.has(projectId)) return; const next = new Set(dismissedRecents); next.delete(projectId); persistDismissed(next); }
   function dismissRecent(projectId: string) { const next = new Set(dismissedRecents); next.add(projectId); persistDismissed(next); }
   function clearRecentProjects() { persistDismissed(new Set(projects.map((item) => item.id))); }
+  function enableProjectNameEditing() {
+    setProjectNameEditable(true);
+    requestAnimationFrame(() => {
+      projectNameInput.current?.focus();
+      projectNameInput.current?.select();
+    });
+  }
 
   function rememberSourceAspect(filename: string, width: number, height: number) {
     const ratio = width / Math.max(1, height);
@@ -121,7 +148,7 @@ export function StartPage() {
     if (!selected.size) { setError("Select at least one source asset for the project."); return; }
     setLoading(true); setError(""); setTransferMessage("");
     try {
-      const result = await createProject({ name: projectName, source_path: sourcePath, trigger_word: triggerWord, selected_filenames: [...selected] } as any);
+      const result = await createProject({ name: projectName.trim(), source_path: sourcePath, trigger_word: triggerWord, description: projectDescription.trim(), selected_filenames: [...selected] });
       restoreRecent(result.project.id); setProject(result.project); setRevision(result.revision); setRun(null);
       setDataset(await inspectDataset(result.revision.files_path)); setProjects(await listProjects());
     } catch (err) { setError(err instanceof Error ? err.message : "Unable to create project"); } finally { setLoading(false); }
@@ -159,39 +186,63 @@ export function StartPage() {
     <header className="page-header"><div><p className="eyebrow">Projects</p><h1>{project ? project.name : "Create or Open a Training Project"}</h1><p className="muted">Source training assets remain golden and untouched. A project contains only the assets you deliberately select, with provenance retained back to their source.</p></div>{project && <div className="project-identity"><span>Project ID</span><strong>{project.id}</strong></div>}</header>
 
     {!project && <>
-      <section className="panel stack">
-        <div className="prep-section-heading"><div><div className="card-title">New Project</div><p className="muted">Create from source assets, or restore a complete Fizgig project archive from another pod.</p></div><div className="actions"><button type="button" className="secondary" disabled={loading} onClick={() => projectArchiveInput.current?.click()}>Import Project Archive</button><input ref={projectArchiveInput} className="visually-hidden-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/gzip,application/x-tar" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void onProjectArchive(file); }} /></div></div>
-        <div className="form-row"><label>Project name<input value={projectName} onChange={(e) => { setProjectName(e.target.value); setError(""); }} placeholder="5H1VY Part Three" />{duplicateName && <small className="status-suspect">A project with this display name already exists.</small>}</label><label>Trigger word<input value={triggerWord} onChange={(e) => setTriggerWord(e.target.value)} /></label></div>
-      </section>
-      <section className="panel stack project-source-panel">
-        <div className="prep-section-heading"><div><div className="card-title">Source Training Assets</div><p className="muted">Golden source material. Fizgig reads from this location but never edits it.</p></div></div>
-        <div className="source-path-block">
-          <div className="source-directory-label">Source directory</div>
-          <input aria-label="Source directory" value={sourcePath} onChange={(e) => { setSourcePath(e.target.value); setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); setExpandableSourceImages(new Set()); setTransferMessage(""); }} />
-          <button type="button" className="secondary source-upload-button" disabled={loading} onClick={() => sourceArchiveInput.current?.click()}>{loading ? "Working…" : "Upload Zip/Tar Archive"}</button>
-          <input ref={sourceArchiveInput} className="visually-hidden-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/gzip,application/x-tar" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void onSourceArchive(file); }} />
-          <button type="button" className="secondary source-load-button" onClick={inspectSource} disabled={loading}>{loading ? "Loading…" : "Load Source Directory"}</button>
-        </div>
-        {sourceInfo && <>
-          <div className="source-selection-toolbar">
-            <label className="source-filter-label">Filter filenames
-              <div className="source-filter-shell"><span className={sourceFilter ? "hidden-star" : "filter-star"}>*</span><input value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder="" spellCheck={false} /></div>
-              <small>Wildcards: <code>*john*</code>, <code>portrait_??.png</code>. Empty means <code>*</code>.</small>
-            </label>
-            <div className="source-filter-status"><strong>{visibleSourceImages.length}</strong><span>visible</span><strong>{selected.size}</strong><span>selected of {sourceInfo.image_count}</span></div>
-            <div className="actions source-bulk-actions"><button className="secondary" onClick={selectVisible} disabled={!visibleSourceImages.length}>Select all visible</button><button className="secondary" onClick={deselectVisible} disabled={!visibleSourceImages.length}>Deselect all visible</button></div>
+      <div className="project-entry-grid">
+        <section className="panel create-project-panel">
+          <div className="project-create-heading"><div className="card-title">Create Project</div><p className="muted">Create a new training project from deliberately selected source assets.</p></div>
+
+          <div className="project-create-subpanel stack">
+            <div><div className="card-title">Project Basics</div><p className="muted">A generated project name is ready to use. Edit it only if you want something more memorable.</p></div>
+            <div className="form-row">
+              <label>Project name
+                <div className="project-name-row">
+                  <input ref={projectNameInput} value={projectName} readOnly={!projectNameEditable} onChange={(e) => { setProjectName(e.target.value); setError(""); }} spellCheck={false} />
+                  <button type="button" className="project-name-edit-pill" title="Edit Project Name" onClick={enableProjectNameEditing}>Edit</button>
+                </div>
+                {duplicateName && <small className="status-suspect">A project with this display name already exists.</small>}
+              </label>
+              <label>Trigger word<input value={triggerWord} onChange={(e) => setTriggerWord(e.target.value)} /></label>
+            </div>
+            <label>Project Description (optional)<textarea value={projectDescription} onChange={(e) => setProjectDescription(e.target.value)} rows={3} placeholder="What is this training project for?" /></label>
           </div>
-          <div className="prep-section-heading"><div><strong>Available source assets</strong><span className="muted"> {visibleSourceImages.length}{visibleSourceImages.length !== sourceInfo.image_count ? ` of ${sourceInfo.image_count}` : ""}</span></div></div>
-          {visibleSourceImages.length > 0 ? <div className="source-selection-grid">{visibleSourceImages.map((image) => <button type="button" key={image.filename} className={`prep-image-card source-selection-card ${selected.has(image.filename) ? "selected" : "excluded"}`} onClick={() => setSelected((current) => { const next = new Set(current); next.has(image.filename) ? next.delete(image.filename) : next.add(image.filename); return next; })}><div className={`prep-image-wrap source-selection-image ${expandableSourceImages.has(image.filename) ? "can-expand" : ""}`}><img src={image.image_url} alt={image.filename} onLoad={(event) => rememberSourceAspect(image.filename, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />{image.has_caption && <span className="caption-badge" title={image.caption}>C</span>}<span className="selection-check">{selected.has(image.filename) ? "✓" : ""}</span></div><div className="prep-image-meta"><strong title={image.filename}>{image.filename}</strong></div></button>)}</div> : <div className="notice">No source assets match <strong>{sourceFilter || "*"}</strong>.</div>}
-          <div className="summary-ledger source-accounting-ledger">
-            <div><span>Selected Project Assets</span><strong>{selected.size}</strong><small>of {sourceInfo.image_count} available source images</small></div>
-            <div><span>Associated Captions</span><strong>{selectedCaptionCount}</strong><small>matching captions in selected assets</small></div>
-            <div><span>Images Requiring Captioning</span><strong>{Math.max(0, selected.size - selectedCaptionCount)}</strong><small>selected images without a caption</small></div>
+
+          <div className="project-create-subpanel stack project-source-panel">
+            <div className="prep-section-heading"><div><div className="card-title">Source Training Assets</div><p className="muted">Golden source material. Fizgig reads from this location but never edits it.</p></div></div>
+            <div className="source-path-block">
+              <div className="source-directory-label">Source directory</div>
+              <input aria-label="Source directory" value={sourcePath} onChange={(e) => { setSourcePath(e.target.value); setSourceInfo(null); setSelected(new Set()); setSourceFilter(""); setExpandableSourceImages(new Set()); setTransferMessage(""); }} />
+              <button type="button" className="secondary source-upload-button" disabled={loading} onClick={() => sourceArchiveInput.current?.click()}>{loading ? "Working…" : "Upload Zip/Tar Archive"}</button>
+              <input ref={sourceArchiveInput} className="visually-hidden-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/gzip,application/x-tar" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void onSourceArchive(file); }} />
+              <button type="button" className="secondary source-load-button" onClick={inspectSource} disabled={loading}>{loading ? "Loading…" : "Load Source Directory"}</button>
+            </div>
+            {sourceInfo && <>
+              <div className="source-selection-toolbar">
+                <label className="source-filter-label">Filter filenames
+                  <div className="source-filter-shell"><span className={sourceFilter ? "hidden-star" : "filter-star"}>*</span><input value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} placeholder="" spellCheck={false} /></div>
+                  <small>Wildcards: <code>*john*</code>, <code>portrait_??.png</code>. Empty means <code>*</code>.</small>
+                </label>
+                <div className="source-filter-status"><strong>{visibleSourceImages.length}</strong><span>visible</span><strong>{selected.size}</strong><span>selected of {sourceInfo.image_count}</span></div>
+                <div className="actions source-bulk-actions"><button className="secondary" onClick={selectVisible} disabled={!visibleSourceImages.length}>Select all visible</button><button className="secondary" onClick={deselectVisible} disabled={!visibleSourceImages.length}>Deselect all visible</button></div>
+              </div>
+              <div className="prep-section-heading"><div><strong>Available source assets</strong><span className="muted"> {visibleSourceImages.length}{visibleSourceImages.length !== sourceInfo.image_count ? ` of ${sourceInfo.image_count}` : ""}</span></div></div>
+              {visibleSourceImages.length > 0 ? <div className="source-selection-grid">{visibleSourceImages.map((image) => <button type="button" key={image.filename} className={`prep-image-card source-selection-card ${selected.has(image.filename) ? "selected" : "excluded"}`} onClick={() => setSelected((current) => { const next = new Set(current); next.has(image.filename) ? next.delete(image.filename) : next.add(image.filename); return next; })}><div className={`prep-image-wrap source-selection-image ${expandableSourceImages.has(image.filename) ? "can-expand" : ""}`}><img src={image.image_url} alt={image.filename} onLoad={(event) => rememberSourceAspect(image.filename, event.currentTarget.naturalWidth, event.currentTarget.naturalHeight)} />{image.has_caption && <span className="caption-badge" title={image.caption}>C</span>}<span className="selection-check">{selected.has(image.filename) ? "✓" : ""}</span></div><div className="prep-image-meta"><strong title={image.filename}>{image.filename}</strong></div></button>)}</div> : <div className="notice">No source assets match <strong>{sourceFilter || "*"}</strong>.</div>}
+              <div className="summary-ledger source-accounting-ledger">
+                <div><span>Selected Project Assets</span><strong>{selected.size}</strong><small>of {sourceInfo.image_count} available source images</small></div>
+                <div><span>Associated Captions</span><strong>{selectedCaptionCount}</strong><small>matching captions in selected assets</small></div>
+                <div><span>Images Requiring Captioning</span><strong>{Math.max(0, selected.size - selectedCaptionCount)}</strong><small>selected images without a caption</small></div>
+              </div>
+            </>}
+            <div className="notice">Creating the project makes an immutable provenance snapshot of the selected assets. Unselected source material does not become a project asset.</div>
           </div>
-        </>}
-        <div className="notice">Creating the project makes an immutable provenance snapshot of the selected assets. Unselected source material does not become a project asset.</div>
-        <div className="actions"><button className="primary" onClick={onCreateProject} disabled={loading || Boolean(duplicateName) || !sourceInfo || selected.size === 0}>{loading ? "Creating…" : "Create Project"}</button></div>
-      </section>
+
+          <div className="actions project-create-actions"><button className="primary" onClick={onCreateProject} disabled={loading || Boolean(duplicateName) || !sourceInfo || selected.size === 0}>{loading ? "Creating…" : "Create Project"}</button></div>
+        </section>
+
+        <section className="panel import-project-panel">
+          <div><div className="card-title">Import Project</div><p className="muted">Open a complete Fizgig project archive from another pod.</p></div>
+          <button type="button" className="secondary project-import-button" disabled={loading} onClick={() => projectArchiveInput.current?.click()}>{loading ? "Working…" : "Open Project Archive"}</button>
+          <input ref={projectArchiveInput} className="visually-hidden-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/gzip,application/x-tar" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void onProjectArchive(file); }} />
+        </section>
+      </div>
     </>}
 
     {!project && recentProjects.length > 0 && <section className="panel stack"><div className="prep-section-heading"><div><div className="card-title">Recent Projects</div><p className="muted">Project ID is the immutable provenance key. Removing an item only clears it from this browser's recent list.</p></div><button className="secondary" onClick={clearRecentProjects}>Clear recent projects</button></div><div className="project-list">{recentProjects.map((item) => { const count = workingDatasetCount(item); return <div className="project-row-shell" key={item.id}><button className="project-row" onClick={() => openProject(item)} disabled={loading}><span><strong>{item.name}</strong><small className="project-id-line">ID: {item.id}</small><small>{item.external_source.path}</small></span><span className="muted">{count} training path{count === 1 ? "" : "s"} · {item.runs.length} runs</span></button><button className="recent-remove" onClick={() => dismissRecent(item.id)} title="Remove from recent projects">×</button></div>; })}</div></section>}
