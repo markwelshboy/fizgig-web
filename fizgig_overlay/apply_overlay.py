@@ -25,7 +25,7 @@ def main() -> None:
     if head != EXPECTED_BASELINE:
         raise RuntimeError(
             "Fizgig telemetry overlay is baseline-sensitive. "
-            f"Expected {EXPECTED_BASELINE}, got {head}. Rebaseline and review the two observer hooks before building."
+            f"Expected {EXPECTED_BASELINE}, got {head}. Rebaseline and review the observer hooks before building."
         )
 
     destination = root / "src" / "fizgig" / "training" / "web_telemetry.py"
@@ -63,6 +63,30 @@ def main() -> None:
         '                pass\n'
         '            try:\n'
         '                d = os.path.join(self.output_dir, "loss_log")\n',
+    )
+
+    # Krea 2 exposes the optimizer LR, sampled timestep and asset identity at the same point as
+    # its existing passive per-image observation. Capture those values for graph overlays without
+    # moving or changing any training operation.
+    krea_trainer = root / "src" / "fizgig" / "krea2" / "trainer.py"
+    replace_once(
+        krea_trainer,
+        '            if loss_watch is not None:\n'
+        '                loss_watch.observe(epoch=epoch + 1, step=global_step,\n'
+        '                                   item_keys=batch.get("item_keys"), timestep=t_used, loss=loss.item())\n'
+        '            # refresh=False so only update(1) draws the bar — otherwise set_postfix AND update each\n',
+        '            if loss_watch is not None:\n'
+        '                loss_watch.observe(epoch=epoch + 1, step=global_step,\n'
+        '                                   item_keys=batch.get("item_keys"), timestep=t_used, loss=loss.item())\n'
+        '            if os.environ.get("FIZGIG_TELEMETRY_DIR", "").strip():\n'
+        '                try:\n'
+        '                    from fizgig.training.web_telemetry import emit_step_context\n'
+        '                    emit_step_context(epoch=epoch + 1, global_step=global_step,\n'
+        '                                      lr=optimizer.param_groups[0]["lr"], timestep=t_used,\n'
+        '                                      item_keys=batch.get("item_keys"), loss_multiplier=step_mult)\n'
+        '                except Exception:\n'
+        '                    pass\n'
+        '            # refresh=False so only update(1) draws the bar — otherwise set_postfix AND update each\n',
     )
 
     print(f"Applied passive fizgig-web telemetry overlay to {head}")
