@@ -311,6 +311,13 @@ class ProjectStore:
         project_dir = self.project_dir(project_id)
         project = self.get_project(project_id)
         revision = self.get_revision(project_id, dataset_revision)
+
+        # A reproducible run must identify the exact base-model bytes before any run
+        # directory is created. Existing model files are SHA-256'd by the background
+        # fingerprint worker; until the core set is verified run preparation is blocked.
+        from .model_downloads import model_download_manager
+        model_manifest = model_download_manager.require_fingerprinted_family(model_family)
+
         run_num = len(project.get("runs", [])) + 1
         run_id = f"run-{run_num:04d}"
         run_dir = project_dir / "runs" / run_id
@@ -345,6 +352,7 @@ class ProjectStore:
             "assets": snapshot_assets,
         }
         _write_json(run_dir / "dataset_snapshot.json", snapshot)
+        _write_json(run_dir / "model_manifest.json", model_manifest)
 
         run = {
             "id": run_id,
@@ -359,6 +367,7 @@ class ProjectStore:
             "dataset_is_scratch": True,
             "output_dir": str(run_dir),
             "config": config or {},
+            "model_manifest": model_manifest,
             "software": {},
             "artifacts": [],
         }
@@ -371,6 +380,7 @@ class ProjectStore:
             "model_family": model_family,
             "trigger_word": trigger_word.strip(),
             "config": config or {},
+            "model_manifest": model_manifest,
         })
 
         project["runs"].append({
@@ -384,7 +394,14 @@ class ProjectStore:
         })
         project["current_run"] = run_id
         self._save_project(project_dir, project)
-        self._event(project_dir, "run_prepared", run_id=run_id, dataset_revision=dataset_revision, model_family=model_family)
+        self._event(
+            project_dir,
+            "run_prepared",
+            run_id=run_id,
+            dataset_revision=dataset_revision,
+            model_family=model_family,
+            model_sha256={asset["key"]: asset["sha256"] for asset in model_manifest["assets"]},
+        )
         return run
 
     def get_run(self, project_id: str, run_id: str) -> dict[str, Any]:
