@@ -13,7 +13,6 @@ from typing import Any
 
 from .projects import project_store
 from .runtime_info import software_snapshot
-from .settings import load_settings
 
 
 def _now() -> str:
@@ -97,9 +96,10 @@ class TrainingRuntime:
         if run.get("status") != "prepared":
             raise ValueError(f"Only a prepared run can be started; this run is {run.get('status', 'unknown')}")
 
-        # Preparation snapshots exact SHA-256s for every core training weight. Check the
-        # persistent fingerprint cache again before launching any cache/training command. A
-        # changed path/size/mtime invalidates the cached hash and forces a new prepared run.
+        # Preparation snapshots exact SHA-256s and paths for every core training weight. Check
+        # those same files again before launching any command. The commands below also use these
+        # frozen paths rather than current Preferences, so changing the app's selected model after
+        # preparation cannot silently change an already-prepared experiment.
         model_manifest = run.get("model_manifest")
         if not isinstance(model_manifest, dict):
             raise ValueError("This prepared run predates training-model fingerprinting. Prepare a new run before training.")
@@ -157,15 +157,23 @@ class TrainingRuntime:
         return path
 
     def _commands(self, run: dict[str, Any], run_dir: Path) -> list[tuple[str, list[str]]]:
-        settings = load_settings()
+        manifest = run.get("model_manifest") or {}
+        model_paths = {
+            str(asset.get("key")): str(asset.get("path") or "")
+            for asset in manifest.get("assets", [])
+            if isinstance(asset, dict)
+        }
+        raw_dit = model_paths.get("krea2_raw_dit", "")
+        vae = model_paths.get("krea2_vae", "")
+        text_encoder = model_paths.get("krea2_text_encoder", "")
         required = {
-            "Krea 2 RAW DiT": settings.krea2_raw_dit,
-            "Krea 2 VAE": settings.krea2_vae,
-            "Krea 2 text encoder": settings.krea2_text_encoder,
+            "Krea 2 RAW DiT": raw_dit,
+            "Krea 2 VAE": vae,
+            "Krea 2 text encoder": text_encoder,
         }
         missing = [label for label, path in required.items() if not path or not Path(path).is_file()]
         if missing:
-            raise ValueError("Training model paths are not ready: " + ", ".join(missing))
+            raise ValueError("Prepared training model paths are not ready: " + ", ".join(missing))
 
         fizgig_root = Path(os.environ.get("FIZGIG_ROOT", "/opt/Fizgig")).resolve()
         scripts = fizgig_root / "src" / "fizgig" / "scripts"
@@ -181,20 +189,20 @@ class TrainingRuntime:
         cache_latents = [
             py, str(scripts / "krea2_cache_latents.py"),
             "--dataset_config", str(dataset_toml),
-            "--vae", settings.krea2_vae,
+            "--vae", vae,
             "--skip_existing",
         ]
         cache_text = [
             py, str(scripts / "krea2_cache_text.py"),
             "--dataset_config", str(dataset_toml),
-            "--text_encoder", settings.krea2_text_encoder,
+            "--text_encoder", text_encoder,
         ]
 
         output_name = _safe_output_name(str(run["project_id"]), str(run["id"]))
         train = [
             py, str(scripts / "krea2_train.py"),
             "--dataset_config", str(dataset_toml),
-            "--dit", settings.krea2_raw_dit,
+            "--dit", raw_dit,
             "--output_dir", str(run_dir),
             "--output_name", output_name,
             "--network_dim", str(int(network.get("rank", 32) or 32)),
