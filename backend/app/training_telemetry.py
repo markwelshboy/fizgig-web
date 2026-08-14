@@ -4,6 +4,7 @@ import json
 from collections import deque
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from .projects import project_store
 
@@ -48,6 +49,37 @@ def _console_tail(path: Path, limit: int = 250) -> list[str]:
     except OSError:
         return []
     return list(rows)
+
+
+def _asset_metadata(project_id: str, run: dict[str, Any], run_dir: Path) -> list[dict[str, str]]:
+    """Return the run's frozen trainer-name -> project-image mapping.
+
+    Fizgig's loss watcher identifies an item by basename without extension. The
+    run snapshot already records both the normalized trainer filename and the
+    original project filename, so telemetry can show the actual image without
+    guessing from the live working revision.
+    """
+    snapshot = _read_json(run_dir / "dataset_snapshot.json") or {}
+    revision_id = str(run.get("dataset_revision", ""))
+    rows: list[dict[str, str]] = []
+    for asset in snapshot.get("assets", []):
+        if not isinstance(asset, dict):
+            continue
+        training_filename = str(asset.get("training_filename") or asset.get("filename") or "").strip()
+        project_filename = str(asset.get("project_filename") or asset.get("filename") or "").strip()
+        if not training_filename or not project_filename:
+            continue
+        key = Path(training_filename).stem
+        rows.append({
+            "key": key,
+            "training_filename": training_filename,
+            "project_filename": project_filename,
+            "preview_url": (
+                f"/api/projects/{quote(project_id, safe='')}/revisions/{quote(revision_id, safe='')}"
+                f"/prep/assets/{quote(project_filename, safe='')}/prepared-preview"
+            ),
+        })
+    return rows
 
 
 def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
@@ -95,5 +127,6 @@ def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
         "decision_history": decisions,
         "problem_images": current_problem_state,
         "events": events,
+        "assets": _asset_metadata(project_id, run, run_dir),
         "console_tail": _console_tail(console_path),
     }
