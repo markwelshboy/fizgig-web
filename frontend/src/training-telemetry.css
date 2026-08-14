@@ -1,13 +1,295 @@
-.training-chart-adaptive-line {
+/* Telemetry refinements layered after training-harness.css. */
+.training-chart-loss-line {
+  stroke: #e2e8f0;
+  stroke-width: 2.35;
+}
+.training-chart-lr-line {
   stroke: #38bdf8;
-  stroke-width: 1.2;
-  stroke-dasharray: 2 4;
+  stroke-width: 1.7;
+  stroke-dasharray: 7 5;
   opacity: .9;
 }
-.training-chart-legend .adaptive::before {
-  background: #38bdf8;
+.training-chart-legend .loss::before { background: #e2e8f0; }
+.training-chart-legend .lr::before { background: #38bdf8; }
+.training-chart-legend .decision::before {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #a78bfa;
 }
+.training-chart-adaptive-line {
+  stroke: #f59e0b;
+  stroke-width: 1.35;
+  stroke-dasharray: 3 4;
+  opacity: .92;
+}
+.training-chart-legend .adaptive::before { background: #f59e0b; }
 .training-decision-ribbon.adaptive-ribbon span {
-  border-color: rgba(56,189,248,.38);
-  color: #7dd3fc;
+  border-color: rgba(245,158,11,.4);
+  color: #fbbf24;
+}
+.training-chart-decision-marker line,
+.training-chart-decision-marker circle {
+  stroke: #a78bfa;
+  fill: #a78bfa;
+  opacity: .92;
+}
+.training-chart-decision-marker.plateau line,
+.training-chart-decision-marker.plateau circle {
+  stroke: #fb7185;
+  fill: #fb7185;
+}
+.training-chart-heading-controls {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.training-chart-toggles {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.training-chart-toggles label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid #29384d;
+  border-radius: 999px;
+  padding: 4px 7px;
+  color: #93a3ba;
+  font-size: 9px;
+  cursor: pointer;
+  user-select: none;
+}
+.training-chart-toggles input {
+  width: auto;
+  margin: 0;
+}
+.training-chart-epoch-band.even { fill: rgba(148,163,184,.026); }
+.training-chart-epoch-band.odd { fill: rgba(148,163,184,.062); }
+.training-chart-epoch-boundary {
+  stroke: rgba(148,163,184,.14);
+  stroke-width: 1;
+}
+.training-chart-epoch-label {
+  fill: #56657b;
+  font-size: 9px;
+  font-weight: 600;
+}
+.training-chart-step-tick {
+  stroke: #526177;
+  stroke-width: 1;
+}
+.training-chart-step-label {
+  fill: #66758a;
+  font-size: 8px;
+}
+
+.training-trajectory-toolbar {
+  grid-template-columns: minmax(0,1fr) minmax(390px,.72fr);
+  align-items: center;
+}
+.training-trajectory-navigator {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+.training-trajectory-browser-toggle {
+  width: 100%;
+  min-height: 24px;
+  border: 1px solid #29384d;
+  border-radius: 7px;
+  background: #091423;
+  color: #93a3ba;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 8px;
+  font-size: 9px;
+  cursor: pointer;
+}
+.training-trajectory-carousel-row {
+  display: grid;
+  grid-template-columns: 26px minmax(0,1fr) 26px;
+  gap: 5px;
+  align-items: center;
+}
+.training-trajectory-carousel-strip {
+  display: grid;
+  grid-template-columns: repeat(5,minmax(0,1fr));
+  gap: 5px;
+  min-width: 0;
+}
+.training-trajectory-arrow {
+  width: 26px;
+  height: 48px;
+  padding: 0;
+  border: 1px solid #29384d;
+  border-radius: 7px;
+  background: #091423;
+  color: #b9c5d7;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.training-trajectory-arrow:disabled { opacity: .35; cursor: default; }
+.training-trajectory-thumb {
+  min-width: 0;
+  border: 1px solid #29384d;
+  border-radius: 9px;
+  background: #081321;
+  padding: 5px;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  color: #cbd5e1;
+  overflow: hidden;
+}
+.training-trajectory-thumb.compact { padding: 2px; border-radius: 7px; }
+.training-trajectory-thumb.selected {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 0 1px rgba(139,92,246,.45), 0 0 12px rgba(139,92,246,.18);
+}
+.training-trajectory-thumb-image {
+  position: relative;
+  display: block;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #050c15;
+}
+.training-trajectory-thumb.compact .training-trajectory-thumb-image { aspect-ratio: 1.1 / 1; }
+.training-trajectory-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(1.05px) saturate(.72) brightness(.72);
+  transform: scale(1.045);
+}
+.training-trajectory-thumb.selected img { filter: blur(.7px) saturate(.82) brightness(.78); }
+.training-trajectory-thumb-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #526177;
+  font-size: 9px;
+}
+.training-trajectory-state-letter {
+  position: absolute;
+  left: 50%;
+  top: 48%;
+  transform: translate(-50%,-50%);
+  min-width: 21px;
+  height: 21px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.48);
+  background: rgba(4,10,19,.62);
+  color: #f8fafc;
+  font-size: 11px;
+  font-weight: 800;
+  text-shadow: 0 1px 2px #000;
+}
+.training-trajectory-effective {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border-radius: 999px;
+  padding: 1px 4px;
+  background: rgba(4,10,19,.75);
+  color: #e2e8f0;
+  font-size: 7px;
+  font-weight: 700;
+}
+.training-trajectory-thumb.verdict-easy .training-trajectory-state-letter { border-color: #4ade80; color: #86efac; }
+.training-trajectory-thumb.verdict-learning .training-trajectory-state-letter { border-color: #60a5fa; color: #93c5fd; }
+.training-trajectory-thumb.verdict-watch .training-trajectory-state-letter { border-color: #fbbf24; color: #fde68a; }
+.training-trajectory-thumb.verdict-stuck .training-trajectory-state-letter { border-color: #fb7185; color: #fda4af; }
+.training-trajectory-thumb.verdict-retire .training-trajectory-state-letter { border-color: #c084fc; color: #d8b4fe; }
+.training-trajectory-thumb-name {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8px;
+  color: #8190a6;
+}
+.training-trajectory-browser {
+  border: 1px solid #26354c;
+  border-radius: 11px;
+  background: #07111e;
+  padding: 10px;
+  animation: telemetry-drawer-in .15s ease-out;
+}
+.training-trajectory-browser-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill,minmax(82px,1fr));
+  gap: 7px;
+  max-height: 360px;
+  overflow: auto;
+  padding-right: 3px;
+}
+@keyframes telemetry-drawer-in {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.training-console-tail {
+  display: grid;
+  grid-template-rows: auto minmax(0,1fr);
+}
+.training-console-heading {
+  min-height: 35px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 10px 7px 12px;
+  border-bottom: 1px solid #1c293b;
+}
+.training-console-heading strong { color: #cbd5e1; font-size: 10px; }
+.training-console-mode {
+  width: auto;
+  min-width: 48px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid #334155;
+  background: #0a1626;
+  color: #94a3b8;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  cursor: pointer;
+}
+.training-console-mode.tail {
+  color: #86efac;
+  border-color: rgba(34,197,94,.4);
+  background: rgba(22,101,52,.12);
+}
+.training-console-mode.show {
+  color: #c4b5fd;
+  border-color: rgba(139,92,246,.42);
+}
+.training-console-tail pre {
+  border-top: 0;
+  max-height: 330px;
+  min-height: 250px;
+  scroll-behavior: auto;
+}
+
+@media (max-width: 900px) {
+  .training-trajectory-toolbar { grid-template-columns: 1fr; }
+  .training-trajectory-navigator { max-width: 520px; }
+}
+
+@media (max-width: 560px) {
+  .training-chart-heading-controls { justify-content: flex-start; }
+  .training-trajectory-carousel-strip { grid-template-columns: repeat(5,minmax(42px,1fr)); }
+  .training-trajectory-browser-grid { grid-template-columns: repeat(auto-fill,minmax(68px,1fr)); }
 }
