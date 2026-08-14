@@ -40,6 +40,13 @@ STRICT_BINDING = {
     "max_attempts": 3,
 }
 
+_TRIGGER_RULES = (
+    "require_exact_trigger",
+    "require_trigger_first",
+    "require_single_trigger",
+    "reject_detached_trailing_trigger",
+    "reject_generic_subject_after_trigger",
+)
 _VARIABLE_RE = re.compile(r"\[([A-Z][A-Z0-9_]*)\]")
 
 
@@ -119,19 +126,16 @@ def _default_config() -> dict[str, Any]:
 def _normalize_validation(value: dict[str, Any] | None) -> dict[str, Any]:
     result = deepcopy(STRICT_BINDING)
     if value:
-        for key in (
-            "require_exact_trigger",
-            "require_trigger_first",
-            "require_single_trigger",
-            "reject_detached_trailing_trigger",
-            "reject_generic_subject_after_trigger",
-            "retry_on_failure",
-        ):
+        for key in (*_TRIGGER_RULES, "retry_on_failure"):
             if key in value:
                 result[key] = bool(value[key])
         if "max_attempts" in value:
             result["max_attempts"] = max(1, min(5, int(value["max_attempts"])))
     return result
+
+
+def _requires_trigger(rules: dict[str, Any]) -> bool:
+    return any(bool(rules.get(key)) for key in _TRIGGER_RULES)
 
 
 class CaptionMethodologyStore:
@@ -245,6 +249,12 @@ class CaptionMethodologyStore:
             unknown = [value for value in normalized if value not in available]
             if unknown:
                 raise ValueError(f"Unknown rewrite methodology: {', '.join(unknown)}")
+            unconfigured = [
+                value for value in normalized
+                if value in CUSTOM_IDS and not str(config["customs"][value].get("instruction", "")).strip()
+            ]
+            if unconfigured:
+                raise ValueError(f"Rewrite ladder contains unconfigured custom methodology: {', '.join(unconfigured)}")
             config["rewrite_ladder"] = normalized
         config["updated_at"] = _now()
         _write_json(_config_path(), config)
@@ -267,11 +277,14 @@ class CaptionMethodologyStore:
             raise ValueError(f"Caption methodology {method['name']} is not configured")
         state = caption_template_store.get(project_id, revision_id)
         variables = caption_template_store.variables(project_id, revision_id, state)
-        unknown = sorted(set(_VARIABLE_RE.findall(str(method["instruction"]))) - set(variables))
+        used_variables = sorted(set(_VARIABLE_RE.findall(str(method["instruction"]))))
+        unknown = sorted(set(used_variables) - set(variables))
         if unknown:
             raise ValueError(f"Unknown caption methodology variable(s): {', '.join(unknown)}")
+        if "TRIGGER" in used_variables and not variables["TRIGGER"]:
+            raise ValueError("This caption methodology uses [TRIGGER], but the project trigger word is not configured")
         rendered = _VARIABLE_RE.sub(lambda match: variables.get(match.group(1), match.group(0)), str(method["instruction"]))
-        return {"variables": variables, "rendered_instruction": rendered}
+        return {"variables": variables, "used_variables": used_variables, "rendered_instruction": rendered}
 
     def validate_custom(self, caption: str, trigger: str, rules: dict[str, Any]) -> dict[str, Any]:
         text = " ".join(caption.strip().split())
@@ -282,9 +295,12 @@ class CaptionMethodologyStore:
         if not text:
             errors.append("Caption is empty")
             return {"valid": False, "errors": errors, "warnings": warnings}
+
         if not trigger:
-            errors.append("Project trigger word is not configured")
-            return {"valid": False, "errors": errors, "warnings": warnings}
+            if _requires_trigger(rules):
+                errors.append("Project trigger word is not configured but trigger validation is enabled")
+            return {"valid": not errors, "errors": errors, "warnings": warnings}
+
         exact_count = text.count(trigger)
         ci_count = text.lower().count(trigger.lower())
         if rules["require_exact_trigger"] and exact_count == 0:
