@@ -1,0 +1,13 @@
+.training-chart-adaptive-line {
+  stroke: #38bdf8;
+  stroke-width: 1.2;
+  stroke-dasharray: 2 4;
+  opacity: .9;
+}
+.training-chart-legend .adaptive::before {
+  background: #38bdf8;
+}
+.training-decision-ribbon.adaptive-ribbon span {
+  border-color: rgba(56,189,248,.38);
+  color: #7dd3fc;
+}
