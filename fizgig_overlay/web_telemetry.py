@@ -47,13 +47,14 @@ def emit_metric(*, epoch: int, step: int, loss: float, moving_average: float) ->
     })
 
 
-def emit_step_context(*, epoch: int, global_step: int, lr: float, timestep: float,
+def emit_step_context(*, epoch: int, step_in_epoch: int, global_step: int, lr: float, timestep: float,
                       item_keys: Any, loss_multiplier: float) -> None:
     keys = item_keys if isinstance(item_keys, (list, tuple)) else [item_keys]
     keys = [str(key) for key in keys if key is not None]
     _append("metrics.jsonl", {
         "type": "step_context",
         "epoch": int(epoch),
+        "step_in_epoch": int(step_in_epoch),
         "global_step": int(global_step),
         "lr": float(lr),
         "timestep": float(timestep),
