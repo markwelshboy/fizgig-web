@@ -31,11 +31,20 @@ RUN python3 -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 ARG FIZGIG_REPO=https://github.com/shootthesound/Fizgig.git
-ARG FIZGIG_REF=master
+ARG FIZGIG_REF=6912b8aabb64600dd9da8702c5a04c8f867f7bc2
 RUN git clone --filter=blob:none "$FIZGIG_REPO" /opt/Fizgig \
     && git -C /opt/Fizgig fetch --depth 1 origin "$FIZGIG_REF" \
     && git -C /opt/Fizgig checkout --detach FETCH_HEAD \
     && git -C /opt/Fizgig rev-parse HEAD > /opt/Fizgig/.fizgig-web-built-ref
+
+# The web harness intentionally keeps upstream Fizgig as a separate pinned tree. These two
+# observer-only hooks add structured loss/decision telemetry without changing optimizer,
+# dataset, caption, sampling, or intervention behaviour. apply_overlay.py refuses to run against
+# any other upstream SHA, turning a future rebaseline into an explicit review rather than a
+# silent patch drift.
+COPY fizgig_overlay /tmp/fizgig_overlay
+RUN python3 /tmp/fizgig_overlay/apply_overlay.py /opt/Fizgig /tmp/fizgig_overlay/web_telemetry.py \
+    && rm -rf /tmp/fizgig_overlay
 
 # Keep the heavyweight Fizgig/CUDA environment independent from the browser API
 # requirements. The uv cache retains the large torch/CUDA wheels across builds.
@@ -54,12 +63,17 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 # -----------------------------------------------------------------------------
 FROM ubuntu:22.04 AS final
 
+ARG FIZGIG_REPO=https://github.com/shootthesound/Fizgig.git
+ARG FIZGIG_REF=6912b8aabb64600dd9da8702c5a04c8f867f7bc2
+
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     VIRTUAL_ENV=/opt/venv \
     PATH=/opt/venv/bin:$PATH \
     FIZGIG_ROOT=/opt/Fizgig \
+    FIZGIG_UPSTREAM_REPO=$FIZGIG_REPO \
+    FIZGIG_UPSTREAM_REF=$FIZGIG_REF \
     PYTHONPATH=/opt/Fizgig/src \
     FIZGIG_PROJECTS_ROOT=/workspace/projects \
     FIZGIG_SOURCES_ROOT=/workspace/sources \
