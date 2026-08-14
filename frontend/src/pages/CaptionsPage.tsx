@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   getCaptioningOptions,
   getProjectRevision,
@@ -10,11 +11,12 @@ import {
   unloadCaptionModels,
   type AssetTrainingPolicy,
   type AutoRecaptionPolicy,
-  type CaptionGenerateRequest,
   type CaptioningOptions,
   type ProjectRevisionPolicy,
   type TrainingFilenameState,
 } from "../api";
+import { getCaptionMethodologies, type CaptionMethodologyPayload } from "../caption-methodologies-api";
+import { getCaptionTemplate, updateCaptionTemplate } from "../caption-template-api";
 import {
   getCaptionRuntimeStatus,
   getCaptionStatus,
@@ -24,7 +26,12 @@ import {
   type CaptionSpellcheckResult,
   type CaptionStatusState,
 } from "../caption-runtime-api";
-import { generateProjectAssetCaption, preparedProjectAssetUrl } from "../project-captioning-api";
+import {
+  generateProjectAssetCaption,
+  preparedProjectAssetUrl,
+  type ProjectCaptionGenerateRequest,
+  type ProjectCaptionGenerateResult,
+} from "../project-captioning-api";
 import { useSession } from "../session";
 
 const CAROUSEL_SIZE = 5;
@@ -70,6 +77,7 @@ function SpellingSummary({ result, onReplace }: { result: CaptionSpellcheckResul
 }
 
 export function CaptionsPage() {
+  const navigate = useNavigate();
   const { project, setProject, revision, setRevision, run, triggerWord, setTriggerWord } = useSession();
   const initialAsset = revision?.assets.find((asset) => asset.included !== false);
   const [selectedName, setSelectedName] = useState(initialAsset?.filename ?? "");
@@ -79,18 +87,15 @@ export function CaptionsPage() {
   const [advancedAiOpen, setAdvancedAiOpen] = useState(false);
   const [aiCandidate, setAiCandidate] = useState("");
   const [aiCandidateMetadata, setAiCandidateMetadata] = useState<Record<string, unknown> | null>(null);
-  const [presetEditorOpen, setPresetEditorOpen] = useState(false);
-  const [presetDraft, setPresetDraft] = useState("");
-  const [presetOriginal, setPresetOriginal] = useState("");
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [unloading, setUnloading] = useState(false);
   const [bulkProgress, setBulkProgress] = useState("");
   const [message, setMessage] = useState("");
   const [options, setOptions] = useState<CaptioningOptions | null>(null);
+  const [methodologies, setMethodologies] = useState<CaptionMethodologyPayload | null>(null);
+  const [methodologyId, setMethodologyId] = useState("builtin:training");
   const [provider, setProvider] = useState<"qwen" | "florence">("qwen");
-  const [qwenTask, setQwenTask] = useState("training");
-  const [qwenInstruction, setQwenInstruction] = useState("");
   const [qwenModel, setQwenModel] = useState("");
   const [qwenProcessor, setQwenProcessor] = useState("");
   const [qwenRevision, setQwenRevision] = useState("");
@@ -98,6 +103,9 @@ export function CaptionsPage() {
   const [florenceTask, setFlorenceTask] = useState("<DETAILED_CAPTION>");
   const [maxTokens, setMaxTokens] = useState(120);
   const [addTriggerWord, setAddTriggerWord] = useState(true);
+  const [subjectGrammar, setSubjectGrammar] = useState("feminine");
+  const [grammarProfiles, setGrammarProfiles] = useState<Record<string, { label: string }>>({});
+  const [grammarSaving, setGrammarSaving] = useState(false);
   const [policy, setPolicy] = useState<ProjectRevisionPolicy | null>(null);
   const [trainingNames, setTrainingNames] = useState<TrainingFilenameState | null>(null);
   const [captionRuntime, setCaptionRuntime] = useState<CaptionRuntimeStatus | null>(null);
@@ -123,7 +131,11 @@ export function CaptionsPage() {
   const modelLoaded = Boolean(captionRuntime?.loaded.length);
   const triggerPending = triggerDraft.trim() !== triggerWord.trim();
   const triggerConfigured = Boolean(triggerWord.trim());
-  const generationBlockedByTrigger = addTriggerWord && triggerPending;
+  const qwenMethods = methodologies ? [...methodologies.builtins, ...methodologies.customs] : [];
+  const activeMethodology = qwenMethods.find((method) => method.id === methodologyId);
+  const customMethodology = provider === "qwen" && activeMethodology?.kind === "custom";
+  const generationNeedsTrigger = customMethodology || addTriggerWord;
+  const generationBlockedByTrigger = Boolean(generationNeedsTrigger && (triggerPending || !triggerConfigured));
 
   const trainingNameMaps = useMemo(() => {
     const byId = new Map<string, string>();
@@ -149,14 +161,12 @@ export function CaptionsPage() {
   const selectedDisplayName = selectedAsset ? displayName(selectedAsset) : "";
   const qwenProvider = options?.providers.find((item) => item.id === "qwen" && "tasks" in item);
   const florenceProvider = options?.providers.find((item) => item.id === "florence" && "models" in item);
-  const activeQwenPreset = qwenProvider && "tasks" in qwenProvider ? qwenProvider.tasks[qwenTask] : undefined;
   const qwenCaptionerLabel = `Qwen3-VL — ${modelIdentity(qwenModel || (qwenProvider && "default_model" in qwenProvider ? qwenProvider.default_model : ""), "Qwen3-VL")}`;
   const florenceCaptionerLabel = `Florence-2 — ${modelIdentity(florenceModel, "Florence-2")}`;
   const selectedPolicy = selectedAsset
     ? { training_policy: "automatic" as AssetTrainingPolicy, auto_recaption_policy: "automatic" as AutoRecaptionPolicy, ...(policy?.assets[selectedAsset.filename] ?? {}) }
     : null;
   const captionChanged = Boolean(selectedAsset && captionDraft !== selectedAsset.caption);
-  const presetChanged = presetDraft !== presetOriginal;
   const protectedMatches = useMemo(() => {
     const haystack = captionDraft.toLowerCase();
     return (policy?.caption_validation.protected_phrases ?? []).filter((phrase) => phrase && haystack.includes(phrase.toLowerCase()));
@@ -196,17 +206,20 @@ export function CaptionsPage() {
   }
 
   useEffect(() => {
-    getCaptioningOptions().then((result) => {
+    Promise.all([getCaptioningOptions(), getCaptionMethodologies()]).then(([result, methodResult]) => {
       setOptions(result);
+      setMethodologies(methodResult);
       const qwen = result.providers.find((item) => item.id === "qwen" && "tasks" in item);
       const florence = result.providers.find((item) => item.id === "florence" && "models" in item);
       if (qwen && "tasks" in qwen) {
-        setQwenTask(qwen.default_task);
         setQwenModel(qwen.default_model);
         setQwenProcessor(qwen.default_processor);
         setQwenRevision(qwen.default_revision);
-        const preset = qwen.tasks[qwen.default_task];
-        if (preset) { setQwenInstruction(preset.instruction); setMaxTokens(preset.max_tokens); }
+      }
+      const defaultMethod = methodResult.builtins.find((method) => method.id === "builtin:training") ?? methodResult.builtins[0] ?? methodResult.customs[0];
+      if (defaultMethod) {
+        setMethodologyId(defaultMethod.id);
+        setMaxTokens(defaultMethod.max_tokens);
       }
       if (florence && "models" in florence) {
         setFlorenceModel(florence.default_model);
@@ -224,11 +237,16 @@ export function CaptionsPage() {
 
   useEffect(() => {
     if (!project || !revision) return;
-    getProjectRevisionPolicy(project.id, revision.id).then((result) => {
+    Promise.all([
+      getProjectRevisionPolicy(project.id, revision.id),
+      getCaptionTemplate(project.id, revision.id),
+    ]).then(([result, identity]) => {
       setPolicy(result);
       setProtectedDraft(result.caption_validation.protected_phrases.join("\n"));
       setAcceptedWordsDraft(result.caption_validation.accepted_words.join("\n"));
       setSpellcheckEnabled(result.caption_validation.spellcheck_enabled);
+      setSubjectGrammar(identity.state.grammar_profile);
+      setGrammarProfiles(identity.grammar_profiles);
     }).catch((err) => setMessage(err instanceof Error ? err.message : "Unable to load caption policy"));
   }, [project?.id, revision?.id]);
 
@@ -271,10 +289,6 @@ export function CaptionsPage() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (presetEditorOpen) {
-        if (event.key === "Escape") setPresetEditorOpen(false);
-        return;
-      }
       const target = event.target as HTMLElement | null;
       if (target?.closest("input, textarea, select, button, [contenteditable='true']")) return;
       if (event.key === "ArrowLeft") { event.preventDefault(); navigateBy(-1); }
@@ -382,7 +396,15 @@ export function CaptionsPage() {
     setRevision(await getProjectRevision(project.id, revision.id));
   }
 
-  function generationRequest(): CaptionGenerateRequest {
+  function chooseMethodology(nextId: string) {
+    setMethodologyId(nextId);
+    const method = qwenMethods.find((item) => item.id === nextId);
+    if (method) setMaxTokens(method.max_tokens);
+    setAiCandidate("");
+    setAiCandidateMetadata(null);
+  }
+
+  function generationRequest(): ProjectCaptionGenerateRequest {
     const shouldAddTrigger = addTriggerWord && Boolean(triggerWord.trim());
     if (provider === "qwen") {
       return {
@@ -390,21 +412,37 @@ export function CaptionsPage() {
         model: qwenModel.trim() || undefined,
         processor: qwenProcessor.trim() || undefined,
         revision: qwenRevision.trim() || undefined,
-        task: qwenTask,
-        instruction: qwenInstruction.trim() || undefined,
+        methodology_id: methodologyId,
         max_tokens: maxTokens,
         trigger_word: triggerWord,
-        add_trigger_word: shouldAddTrigger,
+        add_trigger_word: activeMethodology?.kind === "custom" ? false : shouldAddTrigger,
         save: false,
       };
     }
     return { provider, model: florenceModel, task: florenceTask, max_tokens: maxTokens, trigger_word: triggerWord, add_trigger_word: shouldAddTrigger, save: false };
   }
 
-  function captionMetadata() {
-    const trigger_word_added = addTriggerWord && Boolean(triggerWord.trim());
+  function captionMetadata(result?: ProjectCaptionGenerateResult) {
+    const trigger_word_added = provider !== "qwen" || activeMethodology?.kind === "builtin"
+      ? addTriggerWord && Boolean(triggerWord.trim())
+      : false;
     return provider === "qwen"
-      ? { source: "ai", provider, model: qwenModel, processor: qwenProcessor, model_revision: qwenRevision, task: qwenTask, instruction: qwenInstruction, max_tokens: maxTokens, trigger_word: triggerWord, trigger_word_added, prepared_asset: true }
+      ? {
+          source: "ai",
+          provider,
+          model: qwenModel,
+          processor: qwenProcessor,
+          model_revision: qwenRevision,
+          methodology_id: methodologyId,
+          methodology: result?.methodology ?? activeMethodology ?? null,
+          generation_attempts: result?.attempts ?? 1,
+          methodology_validation: result?.validation ?? null,
+          max_tokens: maxTokens,
+          trigger_word: triggerWord,
+          trigger_word_added,
+          trigger_binding: activeMethodology?.kind === "custom" ? "methodology_defined" : "baseline_legacy",
+          prepared_asset: true,
+        }
       : { source: "ai", provider, model: florenceModel, task: florenceTask, max_tokens: maxTokens, trigger_word: triggerWord, trigger_word_added, prepared_asset: true };
   }
 
@@ -430,6 +468,18 @@ export function CaptionsPage() {
     finally { setTriggerSaving(false); }
   }
 
+  async function saveSubjectGrammar(next: string) {
+    if (!project || !revision || next === subjectGrammar) return;
+    setGrammarSaving(true); setMessage("");
+    try {
+      const updated = await updateCaptionTemplate(project.id, revision.id, { grammar_profile: next });
+      setSubjectGrammar(updated.state.grammar_profile);
+      setGrammarProfiles(updated.grammar_profiles);
+      setMessage("Subject grammar saved for custom caption methodologies.");
+    } catch (err) { setMessage(err instanceof Error ? err.message : "Unable to save subject grammar"); }
+    finally { setGrammarSaving(false); }
+  }
+
   async function onSave() {
     if (!selectedAsset) return;
     setSaving(true); setMessage("");
@@ -453,10 +503,9 @@ export function CaptionsPage() {
     if (!project || !revision || !selectedAsset || generationBlockedByTrigger) return;
     setGenerating(true); setMessage(`Generating candidate for ${displayName(selectedAsset)}…`);
     try {
-      const metadata = captionMetadata();
       const result = await generateProjectAssetCaption(project.id, revision.id, selectedAsset.filename, generationRequest());
       setAiCandidate(result.caption);
-      setAiCandidateMetadata(metadata);
+      setAiCandidateMetadata(captionMetadata(result));
       markProviderLoaded(provider);
       setMessage("AI candidate generated. Your Working Caption has not been changed.");
     } catch (err) { setMessage(err instanceof Error ? err.message : "Caption generation failed"); }
@@ -477,7 +526,7 @@ export function CaptionsPage() {
         try {
           const result = await generateProjectAssetCaption(project.id, revision.id, asset.filename, generationRequest());
           markProviderLoaded(provider);
-          await saveCanonical(asset.filename, result.caption, generateAll ? "ai_generate_all" : "ai_generate_missing", captionMetadata());
+          await saveCanonical(asset.filename, result.caption, generateAll ? "ai_generate_all" : "ai_generate_missing", captionMetadata(result));
           if (asset.filename === selectedAsset?.filename) setCaptionDraft(result.caption);
           completed += 1;
         } catch (err) {
@@ -509,30 +558,6 @@ export function CaptionsPage() {
       else { await refreshCaptionRuntime(); setMessage("No AI caption model was loaded."); }
     } catch (err) { setMessage(err instanceof Error ? err.message : "Unable to unload AI model"); }
     finally { setUnloading(false); }
-  }
-
-  function chooseQwenTask(task: string) {
-    setQwenTask(task);
-    if (qwenProvider && "tasks" in qwenProvider) {
-      const preset = qwenProvider.tasks[task];
-      if (preset) { setQwenInstruction(preset.instruction); setMaxTokens(preset.max_tokens); }
-    }
-  }
-
-  function openPresetEditor() {
-    if (!activeQwenPreset) return;
-    const resolved = qwenInstruction.trim() || activeQwenPreset.instruction;
-    setPresetOriginal(resolved);
-    setPresetDraft(resolved);
-    setPresetEditorOpen(true);
-  }
-
-  function savePresetEditor() {
-    if (!presetChanged) return;
-    setQwenInstruction(presetDraft);
-    setPresetOriginal(presetDraft);
-    setPresetEditorOpen(false);
-    setMessage("Caption preset override updated for this captioning session.");
   }
 
   async function saveValidationPolicy() {
@@ -581,15 +606,16 @@ export function CaptionsPage() {
     <header className="page-header"><div><p className="eyebrow">{project.name} · {revision.name}</p><h1>Captions</h1><p className="muted">Image + caption is the primary project unit. AI assistance is optional; project JSON remains authoritative.</p></div></header>
 
     <section className="panel stack">
-      <div><p className="eyebrow">Caption policy</p><div className="card-title">Identity, validation & protected traits</div><p className="muted">The trigger word is project metadata used when new captions are generated. Protected phrases are traits you want the LoRA to learn rather than repeatedly name; Fizgig flags them instead of silently deleting them.</p></div>
-      <div className="caption-trigger-policy">
+      <div><p className="eyebrow">Caption policy</p><div className="card-title">Identity, validation & protected traits</div><p className="muted">The trigger word and subject grammar are project identity metadata. Protected phrases are traits you want the LoRA to learn rather than repeatedly name; Fizgig flags them instead of silently deleting them.</p></div>
+      <div className="caption-trigger-policy caption-identity-policy">
         <label>Trigger word<input value={triggerDraft} onChange={(event) => setTriggerDraft(event.target.value)} placeholder="e.g. sH1VX" spellCheck={false} /></label>
+        <label>Subject grammar<select value={subjectGrammar} onChange={(event) => void saveSubjectGrammar(event.target.value)} disabled={grammarSaving}>{Object.entries(grammarProfiles).map(([key, item]) => <option key={key} value={key}>{item.label}</option>)}</select></label>
         <div className="caption-trigger-policy-actions">
-          <span className={`caption-trigger-policy-help ${triggerPending ? "pending" : ""}`}>{triggerPending ? "Unsaved trigger change. Save it before generating captions with Add trigger enabled." : "Project-level identity. Changing it does not rewrite captions you have already saved."}</span>
+          <span className={`caption-trigger-policy-help ${triggerPending ? "pending" : ""}`}>{triggerPending ? "Unsaved trigger change. Save it before generating captions that use the trigger." : "Project-level identity. Existing saved captions are never rewritten automatically."}</span>
           <button className="secondary" onClick={saveTriggerWord} disabled={triggerSaving || !triggerPending}>{triggerSaving ? "Saving…" : "Save trigger word"}</button>
         </div>
       </div>
-      {!triggerConfigured && <div className="caption-trigger-unset"><strong>No project trigger word is configured.</strong> Caption generation can still run, but Fizgig cannot insert or validate a trigger token until one is saved here.</div>}
+      {!triggerConfigured && <div className="caption-trigger-unset"><strong>No project trigger word is configured.</strong> Baseline Qwen captions can run without one if Add trigger is off; Custom methodologies that use identity variables require it.</div>}
       <div className="form-row">
         <label>Protected traits / phrases<textarea value={protectedDraft} onChange={(event) => setProtectedDraft(event.target.value)} placeholder={"blonde hair\nblue eyes"} /><span className="muted">One per line or comma-separated.</span></label>
         <label>Accepted spellings<textarea value={acceptedWordsDraft} onChange={(event) => setAcceptedWordsDraft(event.target.value)} placeholder={"LoKR\nWelsh\nproduct-name"} /><span className="muted">Project dictionary for intentional words spellcheck should ignore. One per line or comma-separated.</span></label>
@@ -616,26 +642,31 @@ export function CaptionsPage() {
     {selectedAsset && <section className={`panel caption-ai-drawer ${aiOpen ? "open" : ""}`}>
       <button className="caption-ai-toggle" onClick={() => setAiOpen((open) => !open)} aria-expanded={aiOpen}><span><strong>AI Captioning Assistant</strong><span className="muted"> Optional tool — generate a candidate without changing the Working Caption</span></span><span className={`caption-browser-chevron ${aiOpen ? "open" : ""}`}>⌄</span></button>
       {aiOpen && <div className="caption-ai-body stack">
-        <div className="caption-ai-primary-controls">
+        <div className="caption-ai-primary-controls methodology-caption-controls">
           <label>Captioner<select value={provider} onChange={(event) => { setProvider(event.target.value as "qwen" | "florence"); setAiCandidate(""); setAiCandidateMetadata(null); }}><option value="qwen">{qwenCaptionerLabel}</option><option value="florence">{florenceCaptionerLabel}</option></select></label>
-          <div className="caption-control-field"><span className="caption-control-label">Caption Preset</span><div className={`caption-preset-control ${provider === "qwen" ? "editable" : ""}`}>{provider === "qwen" ? <select value={qwenTask} onChange={(event) => chooseQwenTask(event.target.value)}>{qwenProvider && "tasks" in qwenProvider ? Object.entries(qwenProvider.tasks).map(([key, task]) => <option key={key} value={key}>{task.label}</option>) : <option value="training">Training caption (viewpoint-aware)</option>}</select> : <select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select>}{provider === "qwen" && <button type="button" className="caption-preset-edit" onClick={openPresetEditor} disabled={!activeQwenPreset}>View/Edit</button>}</div></div>
+          {provider === "qwen" ? <label>Caption Methodology<select value={methodologyId} onChange={(event) => chooseMethodology(event.target.value)}>
+            <optgroup label="Built-in baselines">{methodologies?.builtins.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}</optgroup>
+            <optgroup label="Custom methodologies">{methodologies?.customs.map((method, index) => <option key={method.id} value={method.id} disabled={!method.configured}>Custom {index + 1} — {method.name}{method.configured ? "" : " (not configured)"}</option>)}</optgroup>
+          </select><span className="muted">{activeMethodology?.description}</span></label> : <label>Florence task<select value={florenceTask} onChange={(event) => setFlorenceTask(event.target.value)}>{florenceProvider && "tasks" in florenceProvider ? florenceProvider.tasks.map((task) => <option key={task} value={task}>{task}</option>) : <option value={florenceTask}>{florenceTask}</option>}</select></label>}
           <label className="caption-token-primary">Max Tokens<input type="number" min={16} max={1024} value={maxTokens} onChange={(event) => setMaxTokens(Number(event.target.value))} /></label>
         </div>
         <div className="caption-ai-action-row">
-          <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord && Boolean(triggerWord.trim())} disabled={!triggerWord.trim()} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord.trim() || "set above"})</span></label>
+          {provider === "qwen" && customMethodology
+            ? <span className="caption-methodology-binding-note">Trigger binding and validation are defined by <strong>{activeMethodology?.name}</strong>.</span>
+            : <label className="caption-trigger-check inline-check"><input type="checkbox" checked={addTriggerWord && Boolean(triggerWord.trim())} disabled={!triggerWord.trim()} onChange={(event) => setAddTriggerWord(event.target.checked)} /> Add trigger <span className="muted">({triggerWord.trim() || "set above"})</span></label>}
+          {provider === "qwen" && <button className="secondary caption-methodology-settings-link" type="button" onClick={() => navigate("/preferences#caption-methodologies")}>Configure methodologies</button>}
           {modelLoaded && <span className="caption-model-loaded-note">Loaded: {captionRuntime?.loaded.map(providerLabel).join(" + ")}</span>}
           <div className="caption-ai-actions caption-ai-actions-primary"><button className="primary" onClick={generateCandidate} disabled={generating || generationBlockedByTrigger}>{generating && !bulkProgress ? "Generating…" : "Generate Candidate"}</button><button className="secondary" onClick={generateMissing} disabled={generating || assets.length === 0 || generationBlockedByTrigger} title={batchGeneratesAll ? "Regenerate every included caption" : `Generate captions for ${missingCount} missing asset${missingCount === 1 ? "" : "s"}`}>{generating && bulkProgress ? bulkProgress : batchGeneratesAll ? "Generate All" : "Generate Missing"}</button><button className="secondary" onClick={unloadAiModel} disabled={generating || unloading || !modelLoaded}>{unloading ? "Unloading…" : "Unload AI model"}</button></div>
         </div>
+        {generationBlockedByTrigger && <div className="notice error">{triggerPending ? "Save the pending trigger-word change before generating with this methodology." : "This methodology requires a project trigger word."}</div>}
         <label className="caption-candidate-label">Generated Candidate<textarea value={aiCandidate} spellCheck={spellcheckEnabled} onChange={(event) => setAiCandidate(event.target.value)} placeholder="Generate a candidate to compare with the Working Caption above." /></label>
         <SpellingSummary result={candidateSpelling} />
         {candidateProtectedMatches.length > 0 && <div className="notice error">AI candidate contains protected phrase{candidateProtectedMatches.length === 1 ? "" : "s"}: <strong>{candidateProtectedMatches.join(", ")}</strong>. Review before using it.</div>}
         <div className="caption-candidate-actions"><button className="secondary" disabled={!aiCandidate.trim()} onClick={() => navigator.clipboard?.writeText(aiCandidate)}>Copy Candidate</button><button className="primary" disabled={!aiCandidate.trim()} onClick={() => { setCaptionDraft(aiCandidate); setDraftSource("ai"); setDraftAiMetadata(aiCandidateMetadata); setMessage("AI candidate copied into Working Caption. Save Caption to commit it."); }}>Use as Working Caption</button></div>
         <button className="caption-advanced-toggle" onClick={() => setAdvancedAiOpen((open) => !open)} aria-expanded={advancedAiOpen}><span>Advanced VLM settings</span><span className={`caption-browser-chevron ${advancedAiOpen ? "open" : ""}`}>⌄</span></button>
-        {advancedAiOpen && <div className="caption-advanced-panel stack"><div className="muted">Preferences supplies the normal model defaults. These controls are optional overrides for this captioning session.</div>{provider === "qwen" ? <><label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /></label><div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div></> : <label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label>}</div>}
+        {advancedAiOpen && <div className="caption-advanced-panel stack"><div className="muted">Preferences supplies the normal model defaults. These controls are optional model overrides for this captioning session; methodology prompts stay centralized in Preferences.</div>{provider === "qwen" ? <><label>Caption model / checkpoint<input value={qwenModel} onChange={(event) => setQwenModel(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/my-qwen" /></label><div className="form-row"><label>Processor override <span className="muted">Optional</span><input value={qwenProcessor} onChange={(event) => setQwenProcessor(event.target.value)} placeholder="Leave blank to use model source" /></label><label>Revision <span className="muted">Optional</span><input value={qwenRevision} onChange={(event) => setQwenRevision(event.target.value)} placeholder="branch, tag, or commit" /></label></div></> : <label>Florence model<select value={florenceModel} onChange={(event) => setFlorenceModel(event.target.value)}>{florenceProvider && "models" in florenceProvider ? florenceProvider.models.map((model) => <option key={model} value={model}>{model}</option>) : <option value={florenceModel}>{florenceModel}</option>}</select></label>}</div>}
       </div>}
     </section>}
-
-    {presetEditorOpen && activeQwenPreset && <div className="caption-modal-backdrop" onMouseDown={() => setPresetEditorOpen(false)}><div className="caption-preset-modal" role="dialog" aria-modal="true" aria-labelledby="caption-preset-modal-title" onMouseDown={(event) => event.stopPropagation()}><div className="caption-preset-modal-heading"><div><p className="eyebrow">Caption preset</p><div className="card-title" id="caption-preset-modal-title">{activeQwenPreset.label}</div></div><button className="caption-modal-close" onClick={() => setPresetEditorOpen(false)} aria-label="Close preset editor">×</button></div><p className="muted">Edit the instruction passed to Qwen for this preset. Saving updates the active session override; generated-caption provenance records the resolved instruction used.</p><textarea className="caption-preset-editor" value={presetDraft} onChange={(event) => setPresetDraft(event.target.value)} autoFocus /><div className="caption-preset-modal-actions"><button className="secondary" onClick={() => setPresetDraft(activeQwenPreset.instruction)} disabled={presetDraft === activeQwenPreset.instruction}>Restore built-in</button><span className="caption-modal-spacer" /><button className="secondary" onClick={() => setPresetEditorOpen(false)}>Cancel</button><button className="primary" onClick={savePresetEditor} disabled={!presetChanged}>Save preset</button></div></div></div>}
 
     {assets.length > 0 && <section className="panel caption-navigator stack">
       <button className="caption-browser-toggle" onClick={() => setBrowserOpen((open) => !open)} aria-expanded={browserOpen}><span>{browserOpen ? "Hide asset browser" : `Browse all ${assets.length}`}</span><span className={`caption-browser-chevron ${browserOpen ? "open" : ""}`}>⌄</span></button>
