@@ -6,6 +6,10 @@ export type TrainingModelAsset = {
   size_gb: number;
   path: string;
   exists: boolean;
+  verified: boolean;
+  hash_status: "missing" | "pending" | "queued" | "hashing" | "verified" | "error";
+  sha256?: string | null;
+  hash_error?: string | null;
   core: boolean;
 };
 
@@ -13,6 +17,8 @@ export type TrainingModelFamilyState = {
   id: "krea2" | "klein" | string;
   name: string;
   ready: boolean;
+  files_ready: boolean;
+  fingerprints_ready: boolean;
   support_ready: boolean;
   gated: boolean;
   assets: TrainingModelAsset[];
@@ -21,6 +27,9 @@ export type TrainingModelFamilyState = {
 export type TrainingModelState = {
   model_dir: string;
   hf_token_available: boolean;
+  fingerprint_algorithm: "sha256" | string;
+  fingerprint_store: string;
+  fingerprinting: boolean;
   families: TrainingModelFamilyState[];
 };
 
