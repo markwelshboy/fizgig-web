@@ -115,7 +115,13 @@ export function TrainingPage() {
     : wandbPatternChoice;
   const trackingEnabled = trackingPrefs.log_with === "all" || trackingPrefs.log_with === "wandb";
   const activeTrainingModels = trainingModelState?.families.find((family) => family.id === activeModelFamily);
+  const trainingFilesReady = Boolean(activeTrainingModels?.files_ready);
+  const trainingFingerprintsReady = Boolean(activeTrainingModels?.fingerprints_ready);
   const trainingModelsReady = Boolean(activeTrainingModels?.ready);
+  const modelFingerprinting = Boolean(
+    trainingModelState?.fingerprinting
+    || activeTrainingModels?.assets.some((asset) => asset.exists && !asset.verified && ["pending", "queued", "hashing"].includes(asset.hash_status)),
+  );
   const runPatternValues = {
     project: project?.name || "project",
     model: activeModelFamily || "model",
@@ -171,6 +177,21 @@ export function TrainingPage() {
 
     return () => { cancelled = true; };
   }, [project?.id, revision?.id, activeModelFamily]);
+
+  useEffect(() => {
+    if (!modelFingerprinting) return;
+    let cancelled = false;
+    const refreshModels = () => {
+      getTrainingModelState()
+        .then((state) => { if (!cancelled) setTrainingModelState(state); })
+        .catch(() => undefined);
+    };
+    const timer = window.setInterval(refreshModels, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [modelFingerprinting, activeModelFamily]);
 
   const readiness = useMemo(() => {
     const assets = (revision?.assets ?? []).filter((asset) => asset.included !== false);
@@ -345,7 +366,7 @@ export function TrainingPage() {
         <div className="training-readiness-card"><span>Included images</span><strong>{loadingReadiness ? "…" : readiness.total}</strong><small>{revision.id}</small></div>
         <div className={`training-readiness-card ${readiness.missing ? "warn" : "good"}`}><span>Saved captions</span><strong>{loadingReadiness ? "…" : `${readiness.saved}/${readiness.total}`}</strong><small>{readiness.missing ? `${readiness.missing} must be completed before preparing a run` : "Ready"}</small></div>
         <div className={`training-readiness-card ${!activeTrigger || readiness.triggerWarnings ? "warn" : "good"}`}><span>Trigger binding</span><strong>{activeTrigger || "None"}</strong><small>{!activeTrigger ? "No project trigger configured" : readiness.triggerWarnings ? `${readiness.triggerWarnings} caption warning${readiness.triggerWarnings === 1 ? "" : "s"}` : "No trigger warnings"}</small></div>
-        <div className={`training-readiness-card ${trainingModelsReady ? "good" : "warn"}`}><span>{modelLabel(activeModelFamily)} models</span><strong>{trainingModelState === null ? "Checking…" : trainingModelsReady ? "Ready" : "Missing"}</strong><small>{trainingModelsReady ? "Core DiT, text encoder and VAE found" : "Configure core training weights in Preferences"}</small></div>
+        <div className={`training-readiness-card ${trainingModelsReady ? "good" : "warn"}`}><span>{modelLabel(activeModelFamily)} models</span><strong>{trainingModelState === null ? "Checking…" : trainingModelsReady ? "Verified" : trainingFilesReady ? "Hashing…" : "Missing"}</strong><small>{trainingModelsReady ? "Core DiT, text encoder and VAE SHA-256 verified" : trainingFilesReady ? "Computing SHA-256 fingerprints before run preparation" : "Configure core training weights in Preferences"}</small></div>
       </div>
 
       <div className="training-readiness-detail-grid">
@@ -473,7 +494,8 @@ export function TrainingPage() {
         {readiness.total === 0 && <span>No included training images.</span>}
         {readiness.missing > 0 && <span>{readiness.missing} included image{readiness.missing === 1 ? " has" : "s have"} no saved caption.</span>}
         {trainingModelState === null && <span>Checking {modelLabel(activeModelFamily)} training model readiness…</span>}
-        {trainingModelState !== null && !trainingModelsReady && <span>{modelLabel(activeModelFamily)} core training models are not ready. Configure them in Preferences → Models.</span>}
+        {trainingModelState !== null && !trainingFilesReady && <span>{modelLabel(activeModelFamily)} core training models are not ready. Configure them in Preferences → Models.</span>}
+        {trainingModelState !== null && trainingFilesReady && !trainingFingerprintsReady && <span>Computing SHA-256 fingerprints for the {modelLabel(activeModelFamily)} core weights. Run preparation unlocks automatically when verification completes.</span>}
         {preparing && <span>Preparing run snapshot…</span>}
       </div>}
 
@@ -481,12 +503,13 @@ export function TrainingPage() {
         <div><span>Dataset revision</span><strong>{revision.id}</strong></div>
         <div><span>Images</span><strong>{readiness.total}</strong></div>
         <div><span>Trigger</span><strong>{activeTrigger || "—"}</strong></div>
+        <div><span>Model identity</span><strong>{trainingModelsReady ? "SHA-256 verified" : "Pending"}</strong></div>
         <div><span>Telemetry mode</span><strong>Observer only</strong></div>
       </div>
 
       <div className="actions">
         <button className="secondary" onClick={() => navigate("/samples")}>Back to Sampling</button>
-        {!trainingModelsReady && trainingModelState !== null && <button className="secondary" onClick={() => navigate("/preferences#training-models")}>Configure Models</button>}
+        {!trainingFilesReady && trainingModelState !== null && <button className="secondary" onClick={() => navigate("/preferences#training-models")}>Configure Models</button>}
         <button className="primary" disabled={!canPrepare} onClick={() => void onPrepareRun()}>{preparing ? "Preparing…" : "Prepare Training Run"}</button>
       </div>
     </section>
@@ -501,7 +524,7 @@ export function TrainingPage() {
         <div><span>Materialized trainer dataset</span><code>{run.dataset_path}</code></div>
         {trackingEnabled && <div><span>W&B run name</span><code>{wandbRunPreview}</code></div>}
       </div>
-      <p className="muted">The dataset and configuration snapshot are project-owned. The trainer is launched as a separate explicit action below; its console, metrics and decision stream stay with this run.</p>
+      <p className="muted">The dataset, model SHA-256 manifest and configuration snapshot are project-owned. The trainer is launched as a separate explicit action below; its console, metrics and decision stream stay with this run.</p>
     </section>}
 
     {run ? <TrainingTelemetryPanel projectId={project.id} run={run} onRunChange={setRun} onError={setError} /> : <section className="panel stack training-telemetry-panel">
