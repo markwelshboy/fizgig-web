@@ -17,7 +17,8 @@ Build/output:
   --prune-hard         Prune all cache from the selected Buildx builder first
 
 Fizgig runtime:
-  --fizgig-ref <ref>   Upstream Fizgig branch/tag/commit (default: master)
+  --fizgig-ref <ref>   Upstream Fizgig branch/tag/commit
+                       (default: pinned telemetry baseline)
   --fizgig-repo <url>  Fizgig source repo URL
 
 Environment:
@@ -29,7 +30,7 @@ Examples:
   ./build_fizgig-web.sh --tag test2
   ./build_fizgig-web.sh --load-test --tag local-test
   ./build_fizgig-web.sh --load --tag local-production-test
-  ./build_fizgig-web.sh --fizgig-ref master --no-push
+  ./build_fizgig-web.sh --fizgig-ref 6912b8aabb64600dd9da8702c5a04c8f867f7bc2 --no-push
 EOF
 }
 
@@ -44,7 +45,7 @@ LOAD=false
 LOAD_TEST=false
 NO_CACHE=false
 PRUNE_HARD=false
-FIZGIG_REF="master"
+FIZGIG_REF="6912b8aabb64600dd9da8702c5a04c8f867f7bc2"
 FIZGIG_REPO="https://github.com/shootthesound/Fizgig.git"
 TEST_DOCKER_HOST="${DOCKER_TEST_HOST:-unix:///run/docker-test/docker.sock}"
 
@@ -81,7 +82,7 @@ if $LOAD_TEST; then
 fi
 
 BUILD_DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-VCS_REF="$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+VCS_REF="$(git rev-parse HEAD 2>/dev/null || echo unknown)"
 IMAGE_VERSION="$TAG"
 
 if $PRUNE_HARD; then
@@ -118,7 +119,7 @@ Load docker-test: $LOAD_TEST
 Test Docker host: $TEST_DOCKER_HOST
 Fizgig repo     : $FIZGIG_REPO
 Fizgig ref      : $FIZGIG_REF
-VCS ref         : $VCS_REF
+Web VCS ref     : $VCS_REF
 Build date      : $BUILD_DATE
 EOF
 
