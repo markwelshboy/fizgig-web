@@ -13,6 +13,7 @@ import "./exception-editor-polish.css";
 import "./caption-workbench.css";
 import "./caption-review-pager.css";
 import "./caption-template.css";
+import "./caption-methodologies.css";
 import "./caption-toast.css";
 import "./start-source-layout.css";
 import "./image-helper-overlays.css";
