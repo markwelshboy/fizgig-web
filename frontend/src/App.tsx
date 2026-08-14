@@ -14,6 +14,7 @@ import { SamplesPage } from "./pages/SamplesPage";
 import { StartPage } from "./pages/StartPage";
 import { TrainingPage } from "./pages/TrainingPage";
 import { useSession } from "./session";
+import { getTrainingModelState, type TrainingModelState } from "./training-models-api";
 
 const nav = [
   ["1", "Start", "/"],
@@ -28,11 +29,15 @@ const IDLE: ActivityStatus = { busy: false, label: "Idle", detail: "", active_co
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { project, closeProject } = useSession();
+  const { project, revision, modelFamily, closeProject } = useSession();
   const [backendActivity, setBackendActivity] = useState<ActivityStatus>(IDLE);
   const [localActivity, setLocalActivity] = useState<ActivityStatus>(IDLE);
   const [notification, setNotification] = useState<RuntimeNotification | null>(null);
+  const [trainingModels, setTrainingModels] = useState<TrainingModelState | null>(null);
   const activity = localActivity.busy ? localActivity : backendActivity;
+  const activeModelFamily = revision?.model_family && revision.model_family !== "generic" ? revision.model_family : modelFamily;
+  const activeTrainingFamily = trainingModels?.families.find((family) => family.id === activeModelFamily);
+  const trainingSetupMissing = location.pathname === "/training" && Boolean(activeTrainingFamily && !activeTrainingFamily.ready);
 
   useEffect(() => subscribeLocalActivity(setLocalActivity), []);
 
@@ -56,6 +61,22 @@ export default function App() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, []);
 
+  useEffect(() => {
+    if (location.pathname !== "/training") return;
+    let stopped = false;
+    async function refreshTrainingModels() {
+      try {
+        const next = await getTrainingModelState();
+        if (!stopped) setTrainingModels(next);
+      } catch {
+        if (!stopped) setTrainingModels(null);
+      }
+    }
+    void refreshTrainingModels();
+    const timer = window.setInterval(() => void refreshTrainingModels(), 5000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [location.pathname, activeModelFamily]);
+
   function onCloseProject() {
     closeProject();
     navigate("/");
@@ -77,8 +98,8 @@ export default function App() {
         </div>
       </aside>
       <main className="content">
-        {location.pathname === "/training" && <div className="training-model-warning" role="alert">
-          <div><strong>Training models are not configured yet.</strong><span>Configure/download the Krea 2 or Klein training model before launching a real run.</span></div>
+        {trainingSetupMissing && <div className="training-model-warning" role="alert">
+          <div><strong>{activeTrainingFamily?.name ?? "Training"} models are not configured.</strong><span>Core DiT, text encoder and VAE weights must be configured before launching this training family.</span></div>
           <button className="secondary" type="button" onClick={() => navigate("/preferences#training-models")}>Setup now</button>
         </div>}
         <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
