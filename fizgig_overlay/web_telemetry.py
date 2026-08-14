@@ -46,6 +46,21 @@ def emit_metric(*, epoch: int, step: int, loss: float, moving_average: float) ->
     })
 
 
+def emit_step_context(*, epoch: int, global_step: int, lr: float, timestep: float,
+                      item_keys: Any, loss_multiplier: float) -> None:
+    keys = item_keys if isinstance(item_keys, (list, tuple)) else [item_keys]
+    keys = [str(key) for key in keys if key is not None]
+    _append("metrics.jsonl", {
+        "type": "step_context",
+        "epoch": int(epoch),
+        "global_step": int(global_step),
+        "lr": float(lr),
+        "timestep": float(timestep),
+        "asset": keys[0] if len(keys) == 1 else "|".join(keys),
+        "loss_multiplier": float(loss_multiplier),
+    })
+
+
 def emit_decision_snapshot(*, epoch: int, stats: dict[str, dict[str, Any]],
                            improving_count: int, plateaued: bool,
                            pending_count: int, best_epoch_estimate: int | None) -> None:
