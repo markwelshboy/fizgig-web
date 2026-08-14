@@ -40,10 +40,12 @@ def _safe_output_name(project_id: str, run_id: str) -> str:
 
 
 def _resolution_from_megapixels(value: float) -> int:
-    # Fizgig treats [side, side] as an area target when bucketing. Keep it on H3/Krea-safe
-    # multiples and avoid accidentally producing a zero/odd bucket target.
-    side = int(math.sqrt(max(0.05, float(value)) * 1_000_000))
-    return max(256, side - side % 32)
+    # Match Fizgig's user-facing convention: [1024,1024] is called the 1 MP target and
+    # [512,512] the 0.25 MP target. Krea 2 buckets on a 16-pixel grid, so round to that same
+    # grid instead of silently producing a slightly smaller target from decimal 1,000,000.
+    side = 1024.0 * math.sqrt(max(0.05, float(value)))
+    step = 16
+    return max(256, int(round(side / step)) * step)
 
 
 class TrainingRuntime:
