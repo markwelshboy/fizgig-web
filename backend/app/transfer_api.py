@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 
@@ -26,17 +28,27 @@ def import_project(archive: UploadFile = File(...)):
 
 
 @router.get("/projects/{project_id}/export")
-def export_project(project_id: str) -> StreamingResponse:
+def export_project(
+    project_id: str,
+    mode: Literal["portable", "workspace"] = "portable",
+) -> StreamingResponse:
     try:
         project_dir = project_store.project_dir(project_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    filename = f"fizgig-project-{project_id}.tar.gz"
+    if mode == "workspace":
+        filename = f"fizgig-workspace-{project_id}.tar.gz"
+    else:
+        filename = f"fizgig-project-{project_id}.tar.gz"
+
     return StreamingResponse(
-        stream_project_archive(project_dir, project_id),
+        stream_project_archive(project_dir, project_id, mode=mode),
         media_type="application/gzip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "X-Fizgig-Archive-Mode": mode,
+        },
     )
 
 
