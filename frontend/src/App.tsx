@@ -37,7 +37,7 @@ export default function App() {
   const activity = localActivity.busy ? localActivity : backendActivity;
   const activeModelFamily = revision?.model_family && revision.model_family !== "generic" ? revision.model_family : modelFamily;
   const activeTrainingFamily = trainingModels?.families.find((family) => family.id === activeModelFamily);
-  const trainingSetupMissing = location.pathname === "/training" && Boolean(activeTrainingFamily && !activeTrainingFamily.ready);
+  const trainingSetupMissing = location.pathname === "/training" && Boolean(project && activeTrainingFamily && !activeTrainingFamily.ready);
 
   useEffect(() => subscribeLocalActivity(setLocalActivity), []);
 
