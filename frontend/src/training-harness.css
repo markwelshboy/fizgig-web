@@ -47,6 +47,9 @@
 .training-policy-card input { width: auto; margin-top: 2px; }
 .training-policy-card span { display: grid; gap: 6px; }
 .training-policy-card small { color: #8090a6; line-height: 1.45; }
+.training-rewrite-ladder { display:grid; gap:9px; padding:12px; border:1px solid #26354c; border-radius:11px; background:#091423; }
+.training-rewrite-ladder > div:first-child { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.training-rewrite-ladder > small { line-height:1.45; }
 .training-principle-note { border-left: 3px solid #8b5cf6; background: rgba(91,33,182,.1); padding: 11px 13px; color: #b8c4d6; font-size: 12px; line-height: 1.5; }
 .training-blockers { display: flex; flex-wrap: wrap; gap: 8px; }
 .training-blockers span { color: #fbbf24; border: 1px solid rgba(245,158,11,.35); background: rgba(120,53,15,.12); border-radius: 8px; padding: 7px 9px; font-size: 11px; }
