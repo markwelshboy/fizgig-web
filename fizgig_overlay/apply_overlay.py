@@ -83,7 +83,7 @@ def main() -> None:
         '            if os.environ.get("FIZGIG_TELEMETRY_DIR", "").strip():\n'
         '                try:\n'
         '                    from fizgig.training.web_telemetry import emit_step_context\n'
-        '                    emit_step_context(epoch=epoch + 1, global_step=global_step,\n'
+        '                    emit_step_context(epoch=epoch + 1, step_in_epoch=i, global_step=global_step,\n'
         '                                      lr=optimizer.param_groups[0]["lr"], timestep=t_used,\n'
         '                                      item_keys=batch.get("item_keys"), loss_multiplier=step_mult)\n'
         '                except Exception:\n'
