@@ -89,6 +89,22 @@ def main() -> None:
         '                    pass\n'
         '            # refresh=False so only update(1) draws the bar — otherwise set_postfix AND update each\n',
     )
+    replace_once(
+        krea_trainer,
+        '        logger.info(f"[adaptive_lr] epoch {epoch + 1}: loss={current_loss:.4f} lr={lr_str} "\n'
+        '                    f"wnorm_Δ={wn_str} | {action} ({reason})")\n'
+        '        self.prev_weight_norm = cur_wn\n',
+        '        logger.info(f"[adaptive_lr] epoch {epoch + 1}: loss={current_loss:.4f} lr={lr_str} "\n'
+        '                    f"wnorm_Δ={wn_str} | {action} ({reason})")\n'
+        '        if os.environ.get("FIZGIG_TELEMETRY_DIR", "").strip():\n'
+        '            try:\n'
+        '                from fizgig.training.web_telemetry import emit_adaptive_lr\n'
+        '                emit_adaptive_lr(epoch=epoch + 1, loss=current_loss, action=action, reason=reason,\n'
+        '                                 before_lr=cur_lr, after_lr=new_lr, weight_growth=weight_growth)\n'
+        '            except Exception:\n'
+        '                pass\n'
+        '        self.prev_weight_norm = cur_wn\n',
+    )
 
     print(f"Applied passive fizgig-web telemetry overlay to {head}")
 
