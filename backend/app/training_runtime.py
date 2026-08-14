@@ -97,6 +97,15 @@ class TrainingRuntime:
         if run.get("status") != "prepared":
             raise ValueError(f"Only a prepared run can be started; this run is {run.get('status', 'unknown')}")
 
+        # Preparation snapshots exact SHA-256s for every core training weight. Check the
+        # persistent fingerprint cache again before launching any cache/training command. A
+        # changed path/size/mtime invalidates the cached hash and forces a new prepared run.
+        model_manifest = run.get("model_manifest")
+        if not isinstance(model_manifest, dict):
+            raise ValueError("This prepared run predates training-model fingerprinting. Prepare a new run before training.")
+        from .model_downloads import model_download_manager
+        model_download_manager.verify_manifest(model_manifest)
+
         batch_size = int(run.get("config", {}).get("dataset", {}).get("batch_size", 1) or 1)
         if batch_size != 1:
             raise ValueError("The telemetry baseline requires Krea 2 batch size 1 so each loss observation maps to one image")
