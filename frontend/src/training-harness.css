@@ -40,6 +40,12 @@
 .training-toggle input { width: auto; margin-top: 2px; }
 .training-toggle span { display: grid; gap: 3px; }
 .training-toggle small { color: #7f8da3; line-height: 1.4; }
+.training-tracking-row { display:grid; grid-template-columns:minmax(280px,1fr) minmax(280px,1fr) auto; gap:12px; align-items:end; }
+.training-tracking-preview { min-height:58px; display:grid; gap:3px; padding:8px 10px; border:1px solid #2b3a50; border-radius:9px; background:#091423; }
+.training-tracking-preview span { color:#8090a6; font-size:9px; text-transform:uppercase; letter-spacing:.07em; }
+.training-tracking-preview strong { color:#eef2ff; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.training-tracking-preview small { color:#7f8da3; font-size:9px; }
+.training-tracking-preview.disabled { opacity:.6; }
 .training-policy-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
 .training-policy-card { display: flex; align-items: flex-start; gap: 11px; border: 1px solid #26354c; background: #0a1422; border-radius: 12px; padding: 14px; min-height: 105px; }
 .training-policy-card.selected { border-color: rgba(139,92,246,.6); box-shadow: inset 0 0 0 1px rgba(139,92,246,.12); }
@@ -72,13 +78,16 @@
 
 @media (max-width: 1100px) {
   .training-readiness-grid, .training-config-grid, .training-config-grid.compact, .training-prepare-summary { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .training-tracking-row { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .training-tracking-row > button { grid-column:1/-1; justify-self:start; }
   .training-span-2 { grid-column: span 2; }
 }
 
 @media (max-width: 760px) {
   .training-model-warning, .training-section-heading, .training-harness-header { align-items: flex-start; flex-direction: column; }
   .training-header-badges { justify-content: flex-start; }
-  .training-readiness-grid, .training-readiness-detail-grid, .training-config-grid, .training-config-grid.compact, .training-policy-grid, .training-prepare-summary, .training-telemetry-grid { grid-template-columns: 1fr; }
+  .training-readiness-grid, .training-readiness-detail-grid, .training-config-grid, .training-config-grid.compact, .training-policy-grid, .training-prepare-summary, .training-telemetry-grid, .training-tracking-row { grid-template-columns: 1fr; }
+  .training-tracking-row > button { grid-column:auto; }
   .training-span-2 { grid-column: auto; }
   .training-run-paths > div { grid-template-columns: 1fr; gap: 5px; }
   .training-history-list > div { flex-direction: column; gap: 4px; }
