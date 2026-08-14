@@ -27,6 +27,11 @@ function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function metricNumber(row: TrainingMetric, field: string) {
+  const value = (row as unknown as Record<string, unknown>)[field];
+  return finite(value) ? value : null;
+}
+
 function scalePoints(values: number[]): { points: NumericPoint[]; min: number; max: number } {
   if (!values.length) return { points: [], min: 0, max: 1 };
   let min = Math.min(...values);
@@ -75,14 +80,15 @@ function significantDecision(snapshot: DecisionSnapshot) {
 
 function GlobalLossChart({ metrics, decisions }: { metrics: TrainingMetric[]; decisions: DecisionSnapshot[] }) {
   const lossRows = metrics.filter((row) => row.type === "loss" && finite(row.loss_moving_average));
-  const lrRows = metrics.filter((row) => row.type === "step_context" && finite(row.lr));
+  const lrRows = metrics.filter((row) => row.type === "step_context" && metricNumber(row, "lr") !== null);
   if (!lossRows.length) return <div className="training-chart-empty">Waiting for the first training loss observation…</div>;
 
   const loss = scalePoints(lossRows.map((row) => row.loss_moving_average as number));
-  const lr = scalePoints(lrRows.map((row) => row.lr as number));
+  const lrValues = lrRows.map((row) => metricNumber(row, "lr") as number);
+  const lr = scalePoints(lrValues);
   const maxEpoch = Math.max(1, ...lossRows.map((row) => finite(row.epoch) ? row.epoch : 1), ...decisions.map((row) => row.epoch));
   const latestLoss = lossRows[lossRows.length - 1].loss_moving_average as number;
-  const latestLr = lrRows.length ? lrRows[lrRows.length - 1].lr as number : null;
+  const latestLr = lrValues.length ? lrValues[lrValues.length - 1] : null;
 
   return <div className="training-chart-shell">
     <div className="training-chart-heading">
