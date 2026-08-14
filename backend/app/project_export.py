@@ -25,14 +25,14 @@ def _portable_member(info: tarfile.TarInfo, *, project_id: str, mode: ArchiveMod
     if info.issym() or info.islnk():
         return None
 
-    if mode == "workspace":
-        return info
-
     parts = PurePosixPath(info.name).parts
     if parts and parts[-1] == "archive_manifest.json":
         # An imported archive may already contain an older export manifest. The
         # current export writes a fresh one after walking the project tree.
         return None
+
+    if mode == "workspace":
+        return info
 
     # A portable/full project archive is the complete experimental record, not a
     # byte-for-byte copy of regenerable training scratch. Keep the frozen run
