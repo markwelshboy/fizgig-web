@@ -122,7 +122,7 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
     const wanted = new Set(nextPreset.components.filter((id) => available.has(id) || id === "project_core" || id === "datasets"));
     setSelected(dependencyClosure(wanted, components));
     setPreset(nextPreset.id);
-    if (nextPreset.id === "clean") setIdentityMode("clone");
+    setIdentityMode(inspection?.collision ? "clone" : nextPreset.identity_mode);
   }
 
   function toggleComponent(id: string, checked: boolean) {
