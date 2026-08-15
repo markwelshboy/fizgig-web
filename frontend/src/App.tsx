@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { NavLink, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import {
   getActivityStatus,
+  notifyRuntime,
   subscribeLocalActivity,
   subscribeRuntimeNotifications,
   type ActivityStatus,
@@ -97,8 +98,15 @@ export default function App() {
   }
 
   async function openImportedProject(imported: ProjectInfo) {
+    // The backend import has already succeeded at this point. Put that project into the session
+    // immediately, then hydrate richer state best-effort. An analysis-only/custom archive may
+    // intentionally omit image bytes, but that must never make a successful import look like it failed.
     setProject(imported);
     setTriggerWord(imported.trigger_word || "");
+    setRun(null);
+    setRevision(null);
+    setDataset(null);
+    navigate("/");
 
     const currentRevision = imported.dataset_revisions.find((entry) => entry.id === imported.current_dataset_revision)
       ?? imported.dataset_revisions[imported.dataset_revisions.length - 1];
@@ -106,26 +114,29 @@ export default function App() {
       if (currentRevision.model_family === "krea2" || currentRevision.model_family === "klein") {
         setModelFamily(currentRevision.model_family);
       }
-      const fullRevision = await getProjectRevision(imported.id, currentRevision.id);
-      setRevision(fullRevision);
-      setDataset(await inspectDataset(fullRevision.files_path));
-    } else {
-      setRevision(null);
-      setDataset(null);
+      try {
+        const fullRevision = await getProjectRevision(imported.id, currentRevision.id);
+        setRevision(fullRevision);
+        try {
+          setDataset(await inspectDataset(fullRevision.files_path));
+        } catch (exc) {
+          setDataset(null);
+          notifyRuntime(`Project imported, but its selected archive does not contain a fully inspectable working dataset: ${exc instanceof Error ? exc.message : String(exc)}`, "info");
+        }
+      } catch (exc) {
+        notifyRuntime(`Project imported, but its current dataset revision could not be opened: ${exc instanceof Error ? exc.message : String(exc)}`, "info");
+      }
     }
 
     if (imported.current_run) {
       try {
         setRun(await getRun(imported.id, imported.current_run));
-      } catch {
-        setRun(null);
+      } catch (exc) {
+        notifyRuntime(`Project imported; the selected archive does not contain the current run in a reviewable form: ${exc instanceof Error ? exc.message : String(exc)}`, "info");
       }
-    } else {
-      setRun(null);
     }
 
     window.dispatchEvent(new CustomEvent("fizgig-projects-changed"));
-    navigate("/");
   }
 
   return (
