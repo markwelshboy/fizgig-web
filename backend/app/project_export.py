@@ -9,113 +9,387 @@ import threading
 from collections.abc import Iterator
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Literal
+from typing import Any, Literal
 
 ArchiveMode = Literal["portable", "workspace"]
+ArchivePreset = Literal["clean", "standard", "full", "exhaustive", "custom"]
+IdentityMode = Literal["preserve", "clone"]
+
 _NUMBERED_CHECKPOINT_RE = re.compile(r"^.+-\d{6}\.safetensors$")
+_PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+COMPONENTS: dict[str, dict[str, Any]] = {
+    "project_core": {
+        "label": "Project definition",
+        "group": "Project",
+        "description": "Project identity, description, trigger binding and project-owned settings.",
+        "dependencies": [],
+        "required": True,
+    },
+    "project_history": {
+        "label": "Project audit history",
+        "group": "Project",
+        "description": "Project-level event history outside individual training runs.",
+        "dependencies": ["project_core"],
+    },
+    "imports": {
+        "label": "Source / import snapshots",
+        "group": "Assets",
+        "description": "Project-owned source snapshots and their manifests.",
+        "dependencies": ["project_core"],
+    },
+    "datasets": {
+        "label": "Dataset revisions, captions & transforms",
+        "group": "Assets",
+        "description": "Prepared dataset revisions including custom captions, crop/transform state, validation policy and training filenames.",
+        "dependencies": ["project_core"],
+        "required": True,
+    },
+    "run_metadata": {
+        "label": "Run configuration & provenance",
+        "group": "Run history",
+        "description": "Run snapshots, dataset manifests, commands, model SHA manifests, policies and software provenance.",
+        "dependencies": ["project_core", "datasets"],
+    },
+    "run_datasets": {
+        "label": "Frozen run datasets",
+        "group": "Run history",
+        "description": "The exact materialized images and captions consumed by each trainer run.",
+        "dependencies": ["run_metadata"],
+    },
+    "telemetry": {
+        "label": "Telemetry, decisions & console",
+        "group": "Run history",
+        "description": "Global/per-image loss, decision history, events and persistent console logs.",
+        "dependencies": ["run_metadata"],
+    },
+    "samples": {
+        "label": "Generated training samples",
+        "group": "Run history",
+        "description": "Preview images rendered during training and preserved with the run.",
+        "dependencies": ["run_metadata"],
+    },
+    "final_lora": {
+        "label": "Final LoRA artifacts",
+        "group": "Training artifacts",
+        "description": "Unnumbered final LoRA outputs registered for completed runs.",
+        "dependencies": ["run_metadata"],
+    },
+    "intermediate_checkpoints": {
+        "label": "Intermediate epoch LoRAs",
+        "group": "Training artifacts",
+        "description": "Numbered epoch checkpoint safetensors.",
+        "dependencies": ["run_metadata"],
+    },
+    "resume_states": {
+        "label": "Resumable optimizer states",
+        "group": "Training artifacts",
+        "description": "LoRA, optimizer and RNG state directories used to resume training.",
+        "dependencies": ["run_metadata"],
+    },
+    "caches": {
+        "label": "Latent / text caches",
+        "group": "Training artifacts",
+        "description": "Regenerable trainer caches. These can be very large.",
+        "dependencies": ["run_metadata", "run_datasets"],
+    },
+}
+
+PRESETS: dict[str, dict[str, Any]] = {
+    "clean": {
+        "label": "Clean",
+        "description": "Reusable project state with prepared assets/captions/settings, no training runs.",
+        "components": ["project_core", "imports", "datasets"],
+        "identity_mode": "clone",
+    },
+    "standard": {
+        "label": "Standard",
+        "description": "Portable experiment archive with run history, telemetry and final LoRAs; excludes resume-only scratch.",
+        "components": [
+            "project_core", "project_history", "imports", "datasets", "run_metadata",
+            "run_datasets", "telemetry", "samples", "final_lora",
+        ],
+        "identity_mode": "preserve",
+    },
+    "full": {
+        "label": "Full",
+        "description": "Standard archive plus intermediate checkpoints and resumable optimizer/RNG states.",
+        "components": [
+            "project_core", "project_history", "imports", "datasets", "run_metadata",
+            "run_datasets", "telemetry", "samples", "final_lora",
+            "intermediate_checkpoints", "resume_states",
+        ],
+        "identity_mode": "preserve",
+    },
+    "exhaustive": {
+        "label": "Exhaustive",
+        "description": "Every project-owned byte, including all checkpoints, states and regenerable caches.",
+        "components": list(COMPONENTS),
+        "identity_mode": "preserve",
+    },
+}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def _portable_member(info: tarfile.TarInfo, *, project_id: str, mode: ArchiveMode) -> tarfile.TarInfo | None:
-    # Never follow or preserve a symlink that could point at a model/cache outside
-    # the project. This applies to both archive modes.
-    if info.issym() or info.islnk():
-        return None
+def _relative_parts(name: str) -> tuple[str, ...]:
+    parts = PurePosixPath(name.replace("\\", "/")).parts
+    if not parts:
+        return ()
+    return tuple(parts[1:]) if len(parts) > 1 else ()
 
-    parts = PurePosixPath(info.name).parts
-    if parts and parts[-1] == "archive_manifest.json":
-        # An imported archive may already contain an older export manifest. The
-        # current export writes a fresh one after walking the project tree.
-        return None
 
-    if mode == "workspace":
-        return info
+def component_for_relative_parts(parts: tuple[str, ...], *, is_dir: bool = False) -> str:
+    """Classify a project-relative archive member into one non-overlapping export component."""
+    if not parts:
+        return "project_core"
+    if parts[0] == "project.json":
+        return "project_core"
+    if len(parts) == 1 and parts[0] == "events.jsonl":
+        return "project_history"
+    if parts[0] == "imports":
+        return "imports"
+    if parts[0] == "datasets":
+        return "datasets"
+    if parts[0] != "runs":
+        return "project_core"
 
-    # A portable/full project archive is the complete experimental record, not a
-    # byte-for-byte copy of regenerable training scratch. Keep the frozen run
-    # dataset, config, telemetry, logs, samples, final LoRA and provenance, while
-    # dropping the heavyweight pieces that can be rebuilt or are only needed for
-    # an exact in-place resume.
-    try:
-        runs_index = parts.index("runs")
-    except ValueError:
-        return info
-
-    # <project>/runs/<run-id>/<run-relative-path...>
-    run_relative = parts[runs_index + 2 :]
-    if not run_relative:
-        return info
-
+    # runs/ itself and runs/<run-id>/ are run-history structure.
+    if len(parts) <= 2:
+        return "run_metadata"
+    run_relative = parts[2:]
     first = run_relative[0]
-    if first in {"cache", "state"}:
-        return None
-    if first.endswith("-state"):
-        return None
 
-    # Fizgig writes intermediate epoch LoRAs directly in the run root as
-    # <output-name>-000002.safetensors, etc. The unnumbered final LoRA remains.
-    if len(run_relative) == 1 and _NUMBERED_CHECKPOINT_RE.fullmatch(first):
-        return None
+    if first == "cache":
+        return "caches"
+    if first == "state" or first.endswith("-state"):
+        return "resume_states"
+    if first in {"sample", "samples"}:
+        return "samples"
+    if first == "dataset":
+        return "run_datasets"
+    if first == "loss_log" or first in {"metrics.jsonl", "events.jsonl", "console.log"}:
+        return "telemetry"
+    if len(run_relative) == 1 and first.endswith(".safetensors"):
+        return "intermediate_checkpoints" if _NUMBERED_CHECKPOINT_RE.fullmatch(first) else "final_lora"
+    return "run_metadata"
 
-    return info
 
-
-def _archive_manifest(project_id: str, mode: ArchiveMode) -> bytes:
-    if mode == "workspace":
-        semantics = {
-            "description": "Literal project workspace snapshot.",
-            "excludes": ["symbolic links"],
-            "includes": [
-                "run caches",
-                "intermediate epoch checkpoints",
-                "optimizer/resume state",
-                "all project-owned run artifacts",
-            ],
-        }
+def component_for_archive_name(name: str, project_id: str | None = None, *, is_dir: bool = False) -> str:
+    parts = PurePosixPath(name.replace("\\", "/")).parts
+    if project_id and parts and parts[0] == project_id:
+        rel = tuple(parts[1:])
+    elif len(parts) > 1:
+        rel = tuple(parts[1:])
     else:
-        semantics = {
-            "description": "Portable full project archive for experiment provenance and reproduction from epoch zero.",
-            "excludes": [
-                "symbolic links",
-                "run cache directories",
-                "optimizer/resume state directories",
-                "numbered intermediate epoch LoRA checkpoints",
-            ],
-            "includes": [
-                "project/import and dataset revisions",
-                "frozen run datasets",
-                "captions, transforms and project policy",
-                "run configuration and model/software provenance",
-                "telemetry, decisions and console logs",
-                "samples and explicitly retained artifacts",
-                "unnumbered final LoRA outputs",
-            ],
-        }
-    value = {
-        "schema_version": 1,
-        "archive_type": mode,
-        "created_at": _now(),
+        rel = tuple(parts)
+    return component_for_relative_parts(rel, is_dir=is_dir)
+
+
+def normalize_components(components: set[str] | list[str] | tuple[str, ...]) -> set[str]:
+    selected = {str(value) for value in components if str(value) in COMPONENTS}
+    selected.add("project_core")
+    selected.add("datasets")
+    changed = True
+    while changed:
+        changed = False
+        for component in list(selected):
+            for dependency in COMPONENTS[component].get("dependencies", []):
+                if dependency not in selected:
+                    selected.add(dependency)
+                    changed = True
+    return selected
+
+
+def components_for_preset(preset: str) -> set[str]:
+    if preset not in PRESETS:
+        raise ValueError(f"Unsupported project archive preset: {preset}")
+    return normalize_components(PRESETS[preset]["components"])
+
+
+def inventory_project(project_dir: Path) -> dict[str, dict[str, int]]:
+    inventory = {key: {"bytes": 0, "file_count": 0} for key in COMPONENTS}
+    for path in project_dir.rglob("*"):
+        if not path.is_file() or path.is_symlink() or path.name == "archive_manifest.json":
+            continue
+        relative = tuple(path.relative_to(project_dir).parts)
+        component = component_for_relative_parts(relative)
+        try:
+            size = path.stat().st_size
+        except OSError:
+            size = 0
+        inventory[component]["bytes"] += int(size)
+        inventory[component]["file_count"] += 1
+    return inventory
+
+
+def export_options(project_dir: Path, project_id: str) -> dict[str, Any]:
+    inventory = inventory_project(project_dir)
+    components = []
+    for component_id, definition in COMPONENTS.items():
+        counts = inventory[component_id]
+        components.append({
+            "id": component_id,
+            **definition,
+            "bytes": counts["bytes"],
+            "file_count": counts["file_count"],
+            "available": counts["file_count"] > 0 or bool(definition.get("required")),
+        })
+    return {
+        "schema_version": 2,
         "project_id": project_id,
-        **semantics,
+        "components": components,
+        "presets": [{"id": key, **value} for key, value in PRESETS.items()],
+    }
+
+
+def _read_project(project_dir: Path) -> dict[str, Any]:
+    return json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+
+
+def _project_json_for_export(
+    project_dir: Path,
+    *,
+    export_project_id: str,
+    export_project_name: str | None,
+    selected: set[str],
+    identity_mode: IdentityMode,
+) -> bytes:
+    value = _read_project(project_dir)
+    original_id = str(value.get("id", project_dir.name))
+    original_name = str(value.get("name", original_id))
+
+    if identity_mode == "clone":
+        value["id"] = export_project_id
+        value["name"] = (export_project_name or export_project_id).strip() or export_project_id
+        value["created_at"] = _now()
+        value["updated_at"] = value["created_at"]
+        value["cloned_from"] = {
+            "project_id": original_id,
+            "project_name": original_name,
+            "dataset_revision": value.get("current_dataset_revision"),
+            "exported_at": value["created_at"],
+        }
+
+    if "run_metadata" not in selected:
+        value["runs"] = []
+        value["current_run"] = None
+
+    return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+
+
+def _archive_manifest(
+    project_dir: Path,
+    *,
+    source_project_id: str,
+    export_project_id: str,
+    preset: str,
+    selected: set[str],
+    identity_mode: IdentityMode,
+    export_project_name: str | None,
+) -> bytes:
+    options = export_options(project_dir, source_project_id)
+    component_rows = []
+    for component in options["components"]:
+        component_rows.append({
+            "id": component["id"],
+            "label": component["label"],
+            "group": component["group"],
+            "description": component["description"],
+            "dependencies": component.get("dependencies", []),
+            "selected": component["id"] in selected,
+            "available": component.get("available", False),
+            "bytes": component.get("bytes", 0),
+            "file_count": component.get("file_count", 0),
+        })
+    value = {
+        "schema_version": 2,
+        "archive_type": "project",
+        "preset": preset,
+        "created_at": _now(),
+        "source_project_id": source_project_id,
+        "project_id": export_project_id,
+        "project_name": export_project_name,
+        "identity_mode": identity_mode,
+        "components": component_rows,
+        "selected_components": sorted(selected),
+        "estimated_uncompressed_bytes": sum(row["bytes"] for row in component_rows if row["selected"]),
+        "notes": [
+            "Components are classified into non-overlapping groups so size estimates can be summed.",
+            "Symbolic links are never exported.",
+            "The manifest describes intended archive semantics; import may select a dependency-safe subset.",
+        ],
     }
     return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
 
 
-def stream_project_archive(project_dir: Path, project_id: str, *, mode: ArchiveMode = "portable") -> Iterator[bytes]:
-    """Produce a gzip tar stream with pipe backpressure and no temporary archive.
+def stream_project_archive(
+    project_dir: Path,
+    project_id: str,
+    *,
+    mode: ArchiveMode | None = None,
+    preset: ArchivePreset = "standard",
+    components: set[str] | None = None,
+    identity_mode: IdentityMode = "preserve",
+    clone_id: str | None = None,
+    clone_name: str | None = None,
+) -> Iterator[bytes]:
+    """Produce a selectable gzip project archive with pipe backpressure.
 
-    ``portable`` is the normal project export: it keeps the complete experiment
-    record while omitting regenerable caches, intermediate epoch LoRAs and resume
-    state. ``workspace`` preserves every project-owned byte and may be very large.
+    ``mode`` remains as a compatibility alias: portable -> standard, workspace -> exhaustive.
+    New callers should use presets/components and identity_mode.
     """
-    if mode not in {"portable", "workspace"}:
-        raise ValueError(f"Unsupported project archive mode: {mode}")
+    if mode is not None:
+        preset = "exhaustive" if mode == "workspace" else "standard"
+    if preset != "custom" and preset not in PRESETS:
+        raise ValueError(f"Unsupported project archive preset: {preset}")
+
+    selected = normalize_components(components or (components_for_preset(preset) if preset != "custom" else set()))
+    if identity_mode not in {"preserve", "clone"}:
+        raise ValueError(f"Unsupported identity mode: {identity_mode}")
+
+    export_project_id = project_id
+    if identity_mode == "clone":
+        export_project_id = (clone_id or "").strip()
+        if not export_project_id or not _PROJECT_ID_RE.fullmatch(export_project_id):
+            raise ValueError("Clone project ID must contain only letters, numbers, dot, underscore or dash")
+        if export_project_id == project_id:
+            raise ValueError("Clone project ID must differ from the source project ID")
+        if not (clone_name or "").strip():
+            raise ValueError("Clone project name is required")
+
+    project_json = _project_json_for_export(
+        project_dir,
+        export_project_id=export_project_id,
+        export_project_name=clone_name,
+        selected=selected,
+        identity_mode=identity_mode,
+    )
+    manifest = _archive_manifest(
+        project_dir,
+        source_project_id=project_id,
+        export_project_id=export_project_id,
+        preset=preset,
+        selected=selected,
+        identity_mode=identity_mode,
+        export_project_name=clone_name if identity_mode == "clone" else _read_project(project_dir).get("name"),
+    )
 
     read_fd, write_fd = os.pipe()
     errors: list[BaseException] = []
+
+    def member_filter(info: tarfile.TarInfo) -> tarfile.TarInfo | None:
+        if info.issym() or info.islnk():
+            return None
+        relative = _relative_parts(info.name)
+        if relative and relative[-1] == "archive_manifest.json":
+            return None
+        if relative == ("project.json",):
+            return None
+        component = component_for_relative_parts(relative, is_dir=info.isdir())
+        return info if component in selected else None
 
     def produce() -> None:
         try:
@@ -123,19 +397,22 @@ def stream_project_archive(project_dir: Path, project_id: str, *, mode: ArchiveM
                 with tarfile.open(fileobj=output, mode="w|gz", dereference=False) as tf:
                     tf.add(
                         project_dir,
-                        arcname=project_id,
+                        arcname=export_project_id,
                         recursive=True,
-                        filter=lambda info: _portable_member(info, project_id=project_id, mode=mode),
+                        filter=member_filter,
                     )
+                    project_info = tarfile.TarInfo(name=f"{export_project_id}/project.json")
+                    project_info.size = len(project_json)
+                    project_info.mtime = int(datetime.now(timezone.utc).timestamp())
+                    project_info.mode = 0o644
+                    tf.addfile(project_info, io.BytesIO(project_json))
 
-                    manifest = _archive_manifest(project_id, mode)
-                    info = tarfile.TarInfo(name=f"{project_id}/archive_manifest.json")
-                    info.size = len(manifest)
-                    info.mtime = int(datetime.now(timezone.utc).timestamp())
-                    info.mode = 0o644
-                    tf.addfile(info, io.BytesIO(manifest))
+                    manifest_info = tarfile.TarInfo(name=f"{export_project_id}/archive_manifest.json")
+                    manifest_info.size = len(manifest)
+                    manifest_info.mtime = int(datetime.now(timezone.utc).timestamp())
+                    manifest_info.mode = 0o644
+                    tf.addfile(manifest_info, io.BytesIO(manifest))
         except BrokenPipeError:
-            # Normal when the browser cancels a download.
             pass
         except BaseException as exc:
             errors.append(exc)
@@ -147,7 +424,7 @@ def stream_project_archive(project_dir: Path, project_id: str, *, mode: ArchiveM
     producer = threading.Thread(
         target=produce,
         daemon=True,
-        name=f"project-export-{project_id}-{mode}",
+        name=f"project-export-{project_id}-{preset}",
     )
     producer.start()
 
