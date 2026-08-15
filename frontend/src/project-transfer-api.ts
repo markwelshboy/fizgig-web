@@ -21,11 +21,14 @@ export type ArchivePreset = {
   identity_mode: "preserve" | "clone";
 };
 
+export type ProjectCloneSuggestion = { id: string; name: string };
+
 export type ProjectExportOptions = {
   schema_version: number;
   project_id: string;
   components: ArchiveComponent[];
   presets: ArchivePreset[];
+  suggested_clone: ProjectCloneSuggestion;
 };
 
 export type ProjectImportInspection = {
@@ -42,6 +45,8 @@ export type ProjectImportInspection = {
     dataset_revision_count: number;
   };
   collision: boolean;
+  collision_message?: string | null;
+  suggested_clone: ProjectCloneSuggestion;
   archive_manifest: Record<string, unknown> | null;
   components: ArchiveComponent[];
   presets: ArchivePreset[];
