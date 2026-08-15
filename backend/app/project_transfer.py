@@ -22,7 +22,13 @@ from .archive_io import (
     _rebase_project_json,
     _safe_member_parts,
 )
-from .project_export import COMPONENTS, PRESETS, component_for_relative_parts, normalize_components
+from .project_export import (
+    COMPONENTS,
+    PRESETS,
+    component_for_relative_parts,
+    normalize_components,
+    suggest_clone_identity,
+)
 
 _STAGE_MAX_AGE = int(os.environ.get("FIZGIG_IMPORT_STAGE_MAX_AGE", str(24 * 60 * 60)))
 _STAGE_TOKEN_RE = re.compile(r"^[a-f0-9]{32}$")
@@ -199,6 +205,8 @@ def stage_project_import(source: BinaryIO, filename: str, projects_root: Path) -
         project_id = project_meta.get("id")
         if not isinstance(project_id, str) or not _PROJECT_ID_RE.fullmatch(project_id):
             raise ValueError("Project archive has an invalid project ID")
+        project_name = str(project_meta.get("name") or project_id)
+        collision = (projects_root / project_id).exists()
         info = {
             "token": token,
             "filename": filename,
@@ -208,12 +216,17 @@ def stage_project_import(source: BinaryIO, filename: str, projects_root: Path) -
             "project_root": list(project_root),
             "project": {
                 "id": project_id,
-                "name": str(project_meta.get("name") or project_id),
+                "name": project_name,
                 "description": str(project_meta.get("description") or ""),
                 "run_count": len(project_meta.get("runs") or []),
                 "dataset_revision_count": len(project_meta.get("dataset_revisions") or []),
             },
-            "collision": (projects_root / project_id).exists(),
+            "collision": collision,
+            "collision_message": (
+                f"Project ID {project_id} already exists on this pod. Choose Create as a clone to import alongside it."
+                if collision else None
+            ),
+            "suggested_clone": suggest_clone_identity(projects_root, project_id, project_name),
             "archive_manifest": manifest,
             "components": _component_rows(inventory, manifest),
             "presets": [{"id": key, **value} for key, value in PRESETS.items()],
@@ -323,12 +336,29 @@ def finalize_project_import(
     if identity_mode not in {"preserve", "clone"}:
         raise ValueError("Identity mode must be preserve or clone")
 
+    source_id = str(info.get("project", {}).get("id") or "")
+    target_id = source_id
+    if identity_mode == "clone":
+        target_id = (clone_id or "").strip()
+        if not target_id or not _PROJECT_ID_RE.fullmatch(target_id):
+            raise ValueError("Clone project ID must contain only letters, numbers, dot, underscore or dash")
+        if not (clone_name or "").strip():
+            raise ValueError("Clone project name is required")
+    destination = (projects_root / target_id).resolve()
+    if destination.parent != projects_root:
+        raise ValueError("Imported project ID resolves outside the projects root")
+    if destination.exists():
+        if identity_mode == "preserve":
+            raise FileExistsError(
+                f"Project ID {target_id} already exists on this pod. Re-inspect the archive and import it as a clone."
+            )
+        raise FileExistsError(f"Clone project ID already exists: {target_id}")
+
     work = stage / "selected"
     shutil.rmtree(work, ignore_errors=True)
     work.mkdir()
     archive_path = stage / ("archive.zip" if info["kind"] == "zip" else "archive.tar")
     project_root = tuple(info.get("project_root") or [])
-    destination: Path | None = None
     moved = False
     try:
         if info["kind"] == "zip":
@@ -344,13 +374,8 @@ def finalize_project_import(
         old_root = _old_project_root(meta)
 
         if identity_mode == "clone":
-            new_id = (clone_id or "").strip()
             new_name = (clone_name or "").strip()
-            if not new_id or not _PROJECT_ID_RE.fullmatch(new_id):
-                raise ValueError("Clone project ID must contain only letters, numbers, dot, underscore or dash")
-            if not new_name:
-                raise ValueError("Clone project name is required")
-            meta["id"] = new_id
+            meta["id"] = target_id
             meta["name"] = new_name
             meta["cloned_from"] = {
                 "project_id": source_id,
@@ -371,15 +396,12 @@ def finalize_project_import(
         project_id = str(meta.get("id") or "")
         if not _PROJECT_ID_RE.fullmatch(project_id):
             raise ValueError("Imported project has an invalid project ID")
-        destination = (projects_root / project_id).resolve()
-        if destination.parent != projects_root:
-            raise ValueError("Imported project ID resolves outside the projects root")
-        if destination.exists():
-            raise FileExistsError(f"Project already exists: {project_id}")
+        if project_id != target_id:
+            raise ValueError("Imported project identity changed unexpectedly during finalization")
 
         project_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
         import_manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "imported_at": _now(),
             "source_archive": info.get("filename"),
             "source_project_id": source_id,
@@ -396,7 +418,7 @@ def finalize_project_import(
         _rebase_project_json(destination, old_root)
         return json.loads((destination / "project.json").read_text(encoding="utf-8"))
     except Exception:
-        if moved and destination is not None and destination.exists():
+        if moved and destination.exists():
             shutil.rmtree(destination, ignore_errors=True)
         raise
     finally:
