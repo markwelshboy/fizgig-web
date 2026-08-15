@@ -40,9 +40,6 @@ def _safe_output_name(project_id: str, run_id: str) -> str:
 
 
 def _resolution_from_megapixels(value: float) -> int:
-    # Match Fizgig's user-facing convention: [1024,1024] is called the 1 MP target and
-    # [512,512] the 0.25 MP target. Krea 2 buckets on a 16-pixel grid, so round to that same
-    # grid instead of silently producing a slightly smaller target from decimal 1,000,000.
     side = 1024.0 * math.sqrt(max(0.05, float(value)))
     step = 16
     return max(256, int(round(side / step)) * step)
@@ -71,10 +68,8 @@ def _schedule_manifest(run_dir: Path, seed: int) -> dict[str, Any] | None:
                     "timestep": row.get("t", row.get("timestep")),
                 }
                 order_record = {"epoch": record["epoch"], "step": record["step"], "key": record["key"]}
-                encoded = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-                encoded_order = json.dumps(order_record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
-                digest.update(encoded + b"\n")
-                order_digest.update(encoded_order + b"\n")
+                digest.update(json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"\n")
+                order_digest.update(json.dumps(order_record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8") + b"\n")
                 count += 1
                 if first is None:
                     first = record
@@ -130,7 +125,7 @@ def _same_number(values: list[Any], label: str) -> float:
 
 
 class TrainingRuntime:
-    """Launch a prepared run in observation-only mode using stock Fizgig entry points."""
+    """Launch a prepared run using stock Fizgig entry points with passive web telemetry."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -165,14 +160,17 @@ class TrainingRuntime:
             alive = bool(self._threads.get((project_id, run_id)) and self._threads[(project_id, run_id)].is_alive())
         return {"run": run, "worker_alive": alive}
 
-    def _sampling_snapshot(self, project_id: str, run: dict[str, Any], run_dir: Path, project_dir: Path) -> dict[str, Any]:
-        """Freeze the project sampling plan at launch and map it only to stock Krea CLI options.
+    def _sampling_snapshot(self, run: dict[str, Any], run_dir: Path, project_dir: Path) -> dict[str, Any]:
+        """Freeze the prepared sampling plan and map only stock Krea CLI capabilities.
 
-        Fizgig's current Krea preview CLI renders one prompt set with a shared width/height/CFG
-        and a base seed that becomes seed+i. We deliberately reject richer web-plan combinations
-        instead of silently changing the standalone trainer's semantics.
+        New runs carry the project sampling plan inside run.config from preparation time. Imported
+        older runs fall back to the current project plan so they retain the legacy start behavior.
         """
-        plan = _read_sampling_plan(project_dir)
+        config = run.get("config") if isinstance(run.get("config"), dict) else {}
+        prepared_plan = config.get("sampling") if isinstance(config, dict) else None
+        plan = prepared_plan if isinstance(prepared_plan, dict) else _read_sampling_plan(project_dir)
+        plan_source = "prepared_run_config" if isinstance(prepared_plan, dict) else "project_plan_legacy_fallback"
+
         samples = plan.get("samples") if isinstance(plan.get("samples"), list) else []
         schedule = plan.get("schedule") if isinstance(plan.get("schedule"), dict) else {}
         renderer = plan.get("renderer") if isinstance(plan.get("renderer"), dict) else {}
@@ -185,6 +183,7 @@ class TrainingRuntime:
         snapshot: dict[str, Any] = {
             "schema_version": 1,
             "captured_at": _now(),
+            "plan_source": plan_source,
             "engine": "stock_fizgig_krea2_preview_cli",
             "active": active,
             "project_plan": plan,
@@ -220,7 +219,7 @@ class TrainingRuntime:
         height = int(_same_number(heights, "height"))
         cfg_scale = float(_same_number(cfgs, "CFG scale"))
 
-        seeds = [int(sample.get("seed", 42) or 0) for sample in samples]
+        seeds = [int(sample.get("seed", 42) if sample.get("seed") is not None else 42) for sample in samples]
         base_seed = seeds[0]
         expected_seeds = [base_seed + index for index in range(len(seeds))]
         if seeds != expected_seeds:
@@ -239,9 +238,6 @@ class TrainingRuntime:
         prompts_path = run_dir / "sample_prompts.txt"
         prompts_path.write_text("\n".join(prompts) + "\n", encoding="utf-8")
 
-        # Preview support weights are not part of the core training-model readiness gate, but a
-        # preview-enabled run still needs their exact bytes identified. Reuse the same persisted
-        # SHA state that Preferences shows and verify it before the trainer launches.
         from .model_downloads import model_download_manager
         state = model_download_manager.training_state()
         family = next((item for item in state.get("families", []) if item.get("id") == "krea2"), None)
@@ -292,6 +288,7 @@ class TrainingRuntime:
         _append_jsonl(run_dir / "events.jsonl", {
             "time": _now(),
             "type": "sampling_snapshot_captured",
+            "plan_source": plan_source,
             "sample_count": len(prompts),
             "sample_at_start": sample_at_start,
             "every_n_epochs": every_n_epochs,
@@ -316,7 +313,7 @@ class TrainingRuntime:
         if batch_size != 1:
             raise ValueError("The telemetry baseline requires Krea 2 batch size 1 so each loss observation maps to one image")
 
-        sampling_snapshot = self._sampling_snapshot(project_id, run, run_dir, project_dir)
+        sampling_snapshot = self._sampling_snapshot(run, run_dir, project_dir)
         seed = int(run.get("config", {}).get("training", {}).get("seed", 42) or 42)
         key = (project_id, run_id)
         with self._lock:
@@ -378,11 +375,7 @@ class TrainingRuntime:
         raw_dit = model_paths.get("krea2_raw_dit", "")
         vae = model_paths.get("krea2_vae", "")
         text_encoder = model_paths.get("krea2_text_encoder", "")
-        required = {
-            "Krea 2 RAW DiT": raw_dit,
-            "Krea 2 VAE": vae,
-            "Krea 2 text encoder": text_encoder,
-        }
+        required = {"Krea 2 RAW DiT": raw_dit, "Krea 2 VAE": vae, "Krea 2 text encoder": text_encoder}
         missing = [label for label, path in required.items() if not path or not Path(path).is_file()]
         if missing:
             raise ValueError("Prepared training model paths are not ready: " + ", ".join(missing))
@@ -398,17 +391,8 @@ class TrainingRuntime:
         lr = config.get("learning_rate", {})
         runtime = config.get("runtime", {})
 
-        cache_latents = [
-            py, str(scripts / "krea2_cache_latents.py"),
-            "--dataset_config", str(dataset_toml),
-            "--vae", vae,
-            "--skip_existing",
-        ]
-        cache_text = [
-            py, str(scripts / "krea2_cache_text.py"),
-            "--dataset_config", str(dataset_toml),
-            "--text_encoder", text_encoder,
-        ]
+        cache_latents = [py, str(scripts / "krea2_cache_latents.py"), "--dataset_config", str(dataset_toml), "--vae", vae, "--skip_existing"]
+        cache_text = [py, str(scripts / "krea2_cache_text.py"), "--dataset_config", str(dataset_toml), "--text_encoder", text_encoder]
 
         output_name = _safe_output_name(str(run["project_id"]), str(run["id"]))
         train = [
@@ -422,8 +406,7 @@ class TrainingRuntime:
             "--max_train_epochs", str(int(training.get("max_epochs", 30) or 30)),
             "--save_every_n_epochs", str(int(training.get("save_every_n_epochs", 1) or 1)),
             "--keep_last_n_states", str(int(training.get("keep_last_states", 4) or 4)),
-            "--save_state",
-            "--save_state_on_train_end",
+            "--save_state", "--save_state_on_train_end",
             "--seed", str(int(training.get("seed", 42) or 42)),
             "--gradient_accumulation_steps", str(int(optimizer.get("gradient_accumulation", 1) or 1)),
             "--max_grad_norm", str(float(optimizer.get("max_grad_norm", 1.0) or 0.0)),
@@ -444,12 +427,7 @@ class TrainingRuntime:
         if lr.get("mode") == "adaptive":
             min_lr = float(lr.get("min_lr", 1e-4) or 1e-4)
             max_lr = float(lr.get("max_lr", 4e-4) or 4e-4)
-            train += [
-                "--learning_rate", str(math.sqrt(min_lr * max_lr)),
-                "--adaptive_lr",
-                "--adaptive_lr_min", str(min_lr),
-                "--adaptive_lr_max", str(max_lr),
-            ]
+            train += ["--learning_rate", str(math.sqrt(min_lr * max_lr)), "--adaptive_lr", "--adaptive_lr_min", str(min_lr), "--adaptive_lr_max", str(max_lr)]
         else:
             train += ["--learning_rate", str(float(lr.get("lr", 1e-4) or 1e-4))]
 
@@ -457,10 +435,7 @@ class TrainingRuntime:
         if isinstance(sampling, dict) and sampling.get("active"):
             stock = sampling.get("stock_options") if isinstance(sampling.get("stock_options"), dict) else {}
             preview_manifest = sampling.get("preview_model") if isinstance(sampling.get("preview_model"), dict) else {}
-            preview_asset = next(
-                (asset for asset in preview_manifest.get("assets", []) if isinstance(asset, dict) and asset.get("key") == "krea2_turbo_dit"),
-                None,
-            )
+            preview_asset = next((asset for asset in preview_manifest.get("assets", []) if isinstance(asset, dict) and asset.get("key") == "krea2_turbo_dit"), None)
             turbo_dit = str((preview_asset or {}).get("path") or "")
             if not turbo_dit or not Path(turbo_dit).is_file():
                 raise ValueError("Prepared Krea 2 preview Turbo path is missing")
@@ -473,13 +448,13 @@ class TrainingRuntime:
                 "--sample_width", str(int(stock.get("width", 1024) or 1024)),
                 "--sample_height", str(int(stock.get("height", 1024) or 1024)),
                 "--sample_steps", str(int(stock.get("steps", 8) or 8)),
-                "--sample_cfg_scale", str(float(stock.get("cfg_scale", 1.0) or 1.0)),
-                "--sample_seed", str(int(stock.get("base_seed", 42) or 0)),
+                "--sample_cfg_scale", str(float(stock.get("cfg_scale", 1.0) if stock.get("cfg_scale") is not None else 1.0)),
+                "--sample_seed", str(int(stock.get("base_seed", 42) if stock.get("base_seed") is not None else 42)),
             ]
             if bool(stock.get("sample_at_start")):
                 train.append("--sample_at_first")
             negative = str(stock.get("negative_prompt") or "").strip()
-            if float(stock.get("cfg_scale", 1.0) or 1.0) > 1.0 and negative:
+            if float(stock.get("cfg_scale", 1.0) if stock.get("cfg_scale") is not None else 1.0) > 1.0 and negative:
                 train += ["--sample_negative", negative]
 
         return [("cache_latents", cache_latents), ("cache_text", cache_text), ("train", train)]
@@ -490,15 +465,7 @@ class TrainingRuntime:
         with console.open("a", encoding="utf-8", buffering=1) as log:
             log.write(f"[{_now()}] === {label} ===\n")
             log.write(f"[{_now()}] $ {' '.join(command)}\n")
-            process = subprocess.Popen(
-                command,
-                cwd=os.environ.get("FIZGIG_ROOT", "/opt/Fizgig"),
-                env=env,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-            )
+            process = subprocess.Popen(command, cwd=os.environ.get("FIZGIG_ROOT", "/opt/Fizgig"), env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
             assert process.stdout is not None
             for line in process.stdout:
                 log.write(f"[{_now()}] {line.rstrip()}\n")
@@ -522,14 +489,7 @@ class TrainingRuntime:
             env["FIZGIG_BUCKET_ORDER"] = "1"
             env["PYTHONHASHSEED"] = str(seed)
             env["PYTHONUNBUFFERED"] = "1"
-            _append_jsonl(run_dir / "events.jsonl", {
-                "time": _now(),
-                "type": "reproducibility_contract",
-                "seed": seed,
-                "bucket_order": "seeded_per_epoch",
-                "python_hash_seed": seed,
-                "training_rng": "upstream_torch_global_seed",
-            })
+            _append_jsonl(run_dir / "events.jsonl", {"time": _now(), "type": "reproducibility_contract", "seed": seed, "bucket_order": "seeded_per_epoch", "python_hash_seed": seed, "training_rng": "upstream_torch_global_seed"})
 
             for stage, command in commands:
                 self._set_status(project_id, run_id, "training" if stage == "train" else stage)
@@ -539,20 +499,8 @@ class TrainingRuntime:
 
             schedule = _schedule_manifest(run_dir, seed)
             final_path = run_dir / f"{_safe_output_name(project_id, run_id)}.safetensors"
-            completed = self._set_status(
-                project_id,
-                run_id,
-                "completed",
-                completed_at=_now(),
-                final_lora=str(final_path) if final_path.is_file() else None,
-                schedule_manifest=schedule,
-            )
-            _append_jsonl(run_dir / "events.jsonl", {
-                "time": _now(),
-                "type": "training_baseline_completed",
-                "final_lora": completed.get("final_lora"),
-                "schedule_sha256": schedule.get("image_timestep_schedule_sha256") if schedule else None,
-            })
+            completed = self._set_status(project_id, run_id, "completed", completed_at=_now(), final_lora=str(final_path) if final_path.is_file() else None, schedule_manifest=schedule)
+            _append_jsonl(run_dir / "events.jsonl", {"time": _now(), "type": "training_baseline_completed", "final_lora": completed.get("final_lora"), "schedule_sha256": schedule.get("image_timestep_schedule_sha256") if schedule else None})
             if final_path.is_file():
                 try:
                     project_store.register_artifact(project_id, run_id, artifact_type="lora", path=str(final_path), metadata={"telemetry_mode": "observation_only"})
