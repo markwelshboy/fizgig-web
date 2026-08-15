@@ -17,11 +17,11 @@ import { useSession } from "./session";
 import { getTrainingModelState, type TrainingModelState } from "./training-models-api";
 
 const nav = [
-  ["1", "Start", "/"],
-  ["2", "Image Prep", "/image-prep"],
-  ["3", "Captions", "/captions"],
-  ["4", "Sampling", "/samples"],
-  ["5", "Training", "/training"],
+  ["ti-hexagon-number-1", "Start", "/"],
+  ["ti-hexagon-number-2", "Image Prep", "/image-prep"],
+  ["ti-hexagon-number-3", "Captions", "/captions"],
+  ["ti-hexagon-number-4", "Sampling", "/samples"],
+  ["ti-hexagon-number-5", "Training", "/training"],
 ];
 
 const IDLE: ActivityStatus = { busy: false, label: "Idle", detail: "", active_count: 0, elapsed_seconds: 0 };
@@ -86,11 +86,11 @@ export default function App() {
     <div className="app-shell">
       <aside className="sidebar">
         <div className="brand"><div className="brand-mark">✦</div><div><strong>Fizgig</strong><span>LoRA Training Studio</span></div></div>
-        <nav>{nav.map(([n, label, to]) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><span className="step">{n}</span>{label}</NavLink>)}</nav>
+        <nav>{nav.map(([icon, label, to]) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><i className={`ti ${icon} step`} aria-hidden="true" />{label}</NavLink>)}</nav>
         <div className="sidebar-spacer" />
-        {project && <a className="nav-item export-project-button" href={`/api/projects/${encodeURIComponent(project.id)}/export`} title="Download the complete portable Fizgig project archive"><span className="step">⇩</span>Export Project</a>}
-        {project && <button className="nav-item close-project-button" onClick={onCloseProject}><span className="step">×</span>Close Project</button>}
-        <NavLink to="/preferences" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}>⚙ Preferences</NavLink>
+        {project && <a className="nav-item export-project-button" href={`/api/projects/${encodeURIComponent(project.id)}/export`} title="Download the complete portable Fizgig project archive"><i className="ti ti-package-export nav-action-icon" aria-hidden="true" />Export Project</a>}
+        {project && <button className="nav-item close-project-button" onClick={onCloseProject}><i className="ti ti-square-rounded-x nav-action-icon" aria-hidden="true" />Close Project</button>}
+        <NavLink to="/preferences" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><i className="ti ti-settings nav-action-icon" aria-hidden="true" />Preferences</NavLink>
         <div className={`status runtime-status ${activity.busy ? "busy" : "idle"}`} title={activity.detail || activity.label}>
           <span className="runtime-ready"><i /> Ready</span>
           <strong>{activity.busy ? "BUSY" : "IDLE"}</strong>
