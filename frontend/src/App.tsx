@@ -7,6 +7,7 @@ import {
   type ActivityStatus,
   type RuntimeNotification,
 } from "./activity-api";
+import { getProjectRevision, getRun, inspectDataset, type ProjectInfo } from "./api";
 import { CaptionsStagePage } from "./pages/CaptionsStagePage";
 import { ImagePrepWorkbenchPageV5 } from "./pages/ImagePrepWorkbenchPageV5";
 import { PreferencesPage } from "./pages/PreferencesPage";
@@ -30,7 +31,18 @@ const IDLE: ActivityStatus = { busy: false, label: "Idle", detail: "", active_co
 export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { project, revision, modelFamily, closeProject } = useSession();
+  const {
+    project,
+    revision,
+    modelFamily,
+    closeProject,
+    setProject,
+    setRevision,
+    setRun,
+    setDataset,
+    setModelFamily,
+    setTriggerWord,
+  } = useSession();
   const [backendActivity, setBackendActivity] = useState<ActivityStatus>(IDLE);
   const [localActivity, setLocalActivity] = useState<ActivityStatus>(IDLE);
   const [notification, setNotification] = useState<RuntimeNotification | null>(null);
@@ -84,6 +96,38 @@ export default function App() {
     navigate("/");
   }
 
+  async function openImportedProject(imported: ProjectInfo) {
+    setProject(imported);
+    setTriggerWord(imported.trigger_word || "");
+
+    const currentRevision = imported.dataset_revisions.find((entry) => entry.id === imported.current_dataset_revision)
+      ?? imported.dataset_revisions[imported.dataset_revisions.length - 1];
+    if (currentRevision) {
+      if (currentRevision.model_family === "krea2" || currentRevision.model_family === "klein") {
+        setModelFamily(currentRevision.model_family);
+      }
+      const fullRevision = await getProjectRevision(imported.id, currentRevision.id);
+      setRevision(fullRevision);
+      setDataset(await inspectDataset(fullRevision.files_path));
+    } else {
+      setRevision(null);
+      setDataset(null);
+    }
+
+    if (imported.current_run) {
+      try {
+        setRun(await getRun(imported.id, imported.current_run));
+      } catch {
+        setRun(null);
+      }
+    } else {
+      setRun(null);
+    }
+
+    window.dispatchEvent(new CustomEvent("fizgig-projects-changed"));
+    navigate("/");
+  }
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -106,14 +150,14 @@ export default function App() {
           <div><strong>{activeTrainingFamily?.name ?? "Training"} models are not configured.</strong><span>Core DiT, text encoder and VAE weights must be configured before launching this training family.</span></div>
           <button className="secondary" type="button" onClick={() => navigate("/preferences#training-models")}>Setup now</button>
         </div>}
-        <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPageShell />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
+        <Routes><Route path="/" element={<StartPage onImportProject={() => setTransferMode("import")} onExportProject={() => setTransferMode("export")} />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPageShell />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
       </main>
       {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
       {transferMode && <ProjectTransferDialog
         mode={transferMode}
         project={project}
         onClose={() => setTransferMode(null)}
-        onImported={() => { window.location.href = "/"; }}
+        onImported={openImportedProject}
       />}
     </div>
   );
