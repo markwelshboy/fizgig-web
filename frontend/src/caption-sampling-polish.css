@@ -129,6 +129,14 @@
   font-size: 11px;
 }
 
+/* Keep the primary five-image selector adjacent to the caption editor. The
+   Browse all control stays above it, but the expanded drawer now opens below
+   the carousel rather than pushing the carousel away from the working caption. */
+.caption-navigator > .caption-browser-toggle { order: 0; }
+.caption-navigator > .caption-carousel-row { order: 1; }
+.caption-navigator > .caption-carousel-position { order: 2; }
+.caption-navigator > .caption-browser { order: 3; }
+
 /* Sampling: make the base cadence the first-order control. */
 .sampling-base-heading {
   align-items: center;
@@ -216,6 +224,12 @@
   color: #7f90a8;
   font-size: 10px;
   font-weight: 500;
+}
+
+.sampling-page input:disabled,
+.sampling-page textarea:disabled {
+  opacity: .64;
+  cursor: not-allowed;
 }
 
 @media (max-width: 900px) {
