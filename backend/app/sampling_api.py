@@ -38,12 +38,14 @@ class SampleDefinition(BaseModel):
     prompt_template: str = Field(min_length=1, max_length=10000)
     width: int = Field(default=1024, ge=128, le=4096)
     height: int = Field(default=1024, ge=128, le=4096)
-    cfg_scale: float = Field(default=4.5, ge=0, le=30)
+    cfg_scale: float = Field(default=1.0, ge=0, le=30)
     seed: int = Field(default=42, ge=0, le=4294967295)
 
 
 class SamplingAuthoring(BaseModel):
-    seed_mode: Literal["fixed", "increment"] = "fixed"
+    # Fizgig's stock Krea preview renderer consumes one base seed and renders prompt i
+    # with base_seed+i, so increment is the least-surprising default for a new plan.
+    seed_mode: Literal["fixed", "increment"] = "increment"
     seed_value: int = Field(default=42, ge=0, le=4294967295)
 
 
@@ -56,7 +58,7 @@ class SamplingSchedule(BaseModel):
 class SamplingRenderer(BaseModel):
     use_distilled: bool = True
     cache_model: Literal["auto", "on", "off"] = "auto"
-    steps: int = Field(default=40, ge=1, le=500)
+    steps: int = Field(default=8, ge=1, le=500)
     negative_prompt: str = Field(default="blurry, low detail, noisy, washed out, oversaturated, distorted", max_length=10000)
     flow_shift: float | None = Field(default=None, ge=0, le=100)
 
@@ -104,12 +106,7 @@ def update_sampling_plan(project_id: str, request: SamplingPlan):
     if len(ids) != len(set(ids)):
         raise HTTPException(status_code=400, detail="Sample IDs must be unique")
     _write_json(path, value)
-    project_store._event(
-        project_dir,
-        "sampling_plan_changed",
-        sample_count=len(value["samples"]),
-        enabled=value["enabled"],
-    )
+    project_store._event(project_dir, "sampling_plan_changed", sample_count=len(value["samples"]), enabled=value["enabled"])
     return value
 
 
@@ -143,12 +140,6 @@ def training_telemetry(project_id: str, run_id: str):
 
 @router.get("/{project_id}/runs/{run_id}/samples/{filename}")
 def training_sample_image(project_id: str, run_id: str, filename: str) -> Response:
-    """Serve a generated preview image from a run-owned sample directory.
-
-    Fizgig currently writes Krea previews to ``sample`` (singular); older web
-    scaffolding also created ``samples``. Only a direct basename with a supported
-    image extension can be read, and the resolved path must remain inside the run.
-    """
     if filename != Path(filename).name:
         raise HTTPException(status_code=400, detail="Invalid sample filename")
     media_type = _SAMPLE_MEDIA_TYPES.get(Path(filename).suffix.lower())
