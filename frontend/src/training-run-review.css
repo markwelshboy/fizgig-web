@@ -35,27 +35,52 @@
 .training-run-browser-row.selected .training-run-browser-status b { color: #86efac; border-color: rgba(34,197,94,.4); background: rgba(22,101,52,.12); }
 
 .training-samples-heading { align-items: flex-start; }
-.training-samples-heading .muted { margin: 4px 0 0; max-width: 760px; }
-.training-samples-controls { display: flex; align-items: flex-end; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
-.training-samples-controls label { display: grid; gap: 4px; color: #7f8da3; font-size: 9px; }
-.training-samples-controls select { min-width: 150px; }
+.training-samples-heading .muted { margin: 4px 0 0; max-width: 780px; }
 .training-samples-count { border: 1px solid #334155; border-radius: 999px; padding: 5px 8px; background: #0b1422; color: #9aa8ba; font-size: 9px; white-space: nowrap; }
 .training-sample-empty { min-height: 90px; display: grid; place-items: center; align-content: center; gap: 6px; border: 1px dashed #2c3c53; border-radius: 11px; background: #081321; color: #718198; text-align: center; padding: 20px; }
 .training-sample-empty strong { color: #b7c2d2; font-size: 11px; }
 .training-sample-empty span { max-width: 760px; font-size: 10px; line-height: 1.45; }
 .training-sample-empty code { color: #c4b5fd; }
-.training-samples-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap: 11px; }
-.training-sample-card { display: grid; gap: 8px; min-width: 0; border: 1px solid #26354c; border-radius: 11px; background: #081321; padding: 8px; color: inherit; text-decoration: none; overflow: hidden; }
-.training-sample-card:hover { border-color: rgba(139,92,246,.6); transform: translateY(-1px); }
-.training-sample-image-shell { display: block; width: 100%; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 8px; background: #050b13; }
+
+.training-sample-epochs { border: 1px solid #25364d; border-radius: 12px; overflow: hidden; }
+.training-sample-epoch-row { display: grid; grid-template-columns: 86px minmax(0,1fr); align-items: stretch; min-width: 0; padding: 12px; gap: 12px; border-top: 1px solid rgba(62,78,101,.42); }
+.training-sample-epoch-row:first-child { border-top: 0; }
+.training-sample-epoch-row:nth-child(odd) { background: rgba(8,19,33,.88); }
+.training-sample-epoch-row:nth-child(even) { background: rgba(17,28,45,.78); }
+.training-sample-epoch-label { display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; padding: 5px 4px; color: #7e90a8; }
+.training-sample-epoch-label span { text-transform: uppercase; letter-spacing: .08em; font-size: 8px; color: #718198; }
+.training-sample-epoch-label strong { font-size: 22px; line-height: 1; color: #ddd6fe; font-variant-numeric: tabular-nums; }
+.training-sample-epoch-label small { font-size: 8px; color: #708198; }
+.training-sample-epoch-images { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: flex-start; gap: 10px; min-width: 0; }
+.training-sample-card { flex: 0 1 184px; min-width: 154px; max-width: 220px; display: grid; gap: 7px; min-width: 154px; border: 1px solid #26354c; border-radius: 10px; background: #07111d; padding: 7px; color: inherit; text-decoration: none; overflow: hidden; cursor: zoom-in; text-align: left; }
+.training-sample-card:hover { border-color: rgba(139,92,246,.68); transform: translateY(-1px); }
+.training-sample-image-shell { display: block; width: 100%; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 7px; background: #050b13; }
 .training-sample-image-shell img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.training-sample-copy { display: grid; gap: 3px; min-width: 0; }
-.training-sample-copy strong { color: #e5e7eb; font-size: 11px; }
-.training-sample-copy small { color: #7f8da3; font-size: 9px; }
-.training-sample-copy code { color: #66758a; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-sample-copy { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 5px; align-items: center; min-width: 0; }
+.training-sample-copy strong { color: #e5e7eb; font-size: 10px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-sample-copy small { color: #7f8da3; font-size: 8px; white-space: nowrap; }
+
+.training-sample-viewer-backdrop { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 28px; background: rgba(2,7,15,.82); backdrop-filter: blur(6px); }
+.training-sample-viewer { width: min(1100px,95vw); max-height: 94vh; display: grid; grid-template-rows: auto minmax(0,1fr) auto; gap: 10px; padding: 14px; border: 1px solid #34445d; border-radius: 14px; background: #0a1422; box-shadow: 0 30px 90px rgba(0,0,0,.6); }
+.training-sample-viewer-header { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.training-sample-viewer-header > div { display: grid; gap: 2px; }
+.training-sample-viewer-header strong { color: #eef2ff; }
+.training-sample-viewer-header span { color: #8193aa; font-size: 10px; }
+.training-sample-viewer-header button { width: 34px; height: 34px; border: 1px solid #334155; border-radius: 8px; background: #0b1625; color: #dbe5f2; cursor: pointer; }
+.training-sample-viewer-image { min-height: 0; display: grid; place-items: center; overflow: hidden; border-radius: 10px; background: #040a12; }
+.training-sample-viewer-image img { max-width: 100%; max-height: calc(94vh - 110px); object-fit: contain; display: block; }
+.training-sample-viewer > code { color: #718198; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 850px) {
   .training-run-browser-row { align-items: flex-start; }
   .training-run-browser-status { grid-template-columns: 1fr; justify-items: end; }
-  .training-samples-controls { justify-content: flex-start; }
+  .training-sample-epoch-row { grid-template-columns: 62px minmax(0,1fr); gap: 8px; padding: 9px; }
+  .training-sample-card { flex-basis: 160px; min-width: 140px; }
+}
+
+@media (max-width: 560px) {
+  .training-sample-epoch-row { grid-template-columns: 1fr; }
+  .training-sample-epoch-label { flex-direction: row; align-items: baseline; gap: 6px; }
+  .training-sample-epoch-label strong { font-size: 16px; }
+  .training-sample-viewer-backdrop { padding: 8px; }
 }
