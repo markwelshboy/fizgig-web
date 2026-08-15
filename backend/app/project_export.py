@@ -17,6 +17,8 @@ IdentityMode = Literal["preserve", "clone"]
 
 _NUMBERED_CHECKPOINT_RE = re.compile(r"^.+-\d{6}\.safetensors$")
 _PROJECT_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_REV_ID_RE = re.compile(r"^(?P<base>.+?)-rev\d+$", re.IGNORECASE)
+_REV_NAME_RE = re.compile(r"^(?P<base>.+?)\s+rev\d+$", re.IGNORECASE)
 
 COMPONENTS: dict[str, dict[str, Any]] = {
     "project_core": {
@@ -134,6 +136,20 @@ def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def suggest_clone_identity(projects_root: Path, project_id: str, project_name: str) -> dict[str, str]:
+    """Return a predictable collision-safe revision-style identity for a project clone."""
+    projects_root = projects_root.resolve()
+    id_match = _REV_ID_RE.match(project_id)
+    name_match = _REV_NAME_RE.match(project_name.strip())
+    base_id = (id_match.group("base") if id_match else project_id).rstrip("-_") or "project"
+    base_name = (name_match.group("base") if name_match else project_name.strip()) or base_id
+    for revision in range(1, 10000):
+        candidate_id = f"{base_id}-rev{revision}"
+        if not (projects_root / candidate_id).exists():
+            return {"id": candidate_id, "name": f"{base_name} rev{revision}"}
+    raise ValueError("Unable to find an available project revision identity")
+
+
 def _relative_parts(name: str) -> tuple[str, ...]:
     parts = PurePosixPath(name.replace("\\", "/")).parts
     if not parts:
@@ -156,7 +172,6 @@ def component_for_relative_parts(parts: tuple[str, ...], *, is_dir: bool = False
     if parts[0] != "runs":
         return "project_core"
 
-    # runs/ itself and runs/<run-id>/ are run-history structure.
     if len(parts) <= 2:
         return "run_metadata"
     run_relative = parts[2:]
@@ -225,6 +240,10 @@ def inventory_project(project_dir: Path) -> dict[str, dict[str, int]]:
     return inventory
 
 
+def _read_project(project_dir: Path) -> dict[str, Any]:
+    return json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
+
+
 def export_options(project_dir: Path, project_id: str) -> dict[str, Any]:
     inventory = inventory_project(project_dir)
     components = []
@@ -237,16 +256,18 @@ def export_options(project_dir: Path, project_id: str) -> dict[str, Any]:
             "file_count": counts["file_count"],
             "available": counts["file_count"] > 0 or bool(definition.get("required")),
         })
+    project = _read_project(project_dir)
     return {
         "schema_version": 2,
         "project_id": project_id,
         "components": components,
         "presets": [{"id": key, **value} for key, value in PRESETS.items()],
+        "suggested_clone": suggest_clone_identity(
+            project_dir.parent,
+            project_id,
+            str(project.get("name") or project_id),
+        ),
     }
-
-
-def _read_project(project_dir: Path) -> dict[str, Any]:
-    return json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
 
 
 def _project_json_for_export(
