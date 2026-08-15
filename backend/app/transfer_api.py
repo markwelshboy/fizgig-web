@@ -98,8 +98,9 @@ def export_project(
             preset = "exhaustive" if mode == "workspace" else "standard"
         effective_identity = identity_mode
         if preset == "clean" and identity_mode == "preserve":
-            # Clean is intentionally a collision-safe clone/template export.
             effective_identity = "clone"
+        if effective_identity == "clone" and (not (clone_id or "").strip() or not (clone_name or "").strip()):
+            raise ValueError("Clone exports require a new project name and project ID")
         filename_id = clone_id if effective_identity == "clone" and clone_id else project_id
         filename = f"fizgig-{preset}-{filename_id}.tar.gz"
         stream = stream_project_archive(
