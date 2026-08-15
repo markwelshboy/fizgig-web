@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import os
@@ -45,6 +46,55 @@ def _resolution_from_megapixels(value: float) -> int:
     side = 1024.0 * math.sqrt(max(0.05, float(value)))
     step = 16
     return max(256, int(round(side / step)) * step)
+
+
+def _schedule_manifest(run_dir: Path, seed: int) -> dict[str, Any] | None:
+    """Hash the observed image/timestep schedule so comparison runs can prove alignment."""
+    path = run_dir / "loss_log" / "per_image_loss.jsonl"
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    order_digest = hashlib.sha256()
+    count = 0
+    first = None
+    last = None
+    try:
+        with path.open("r", encoding="utf-8") as source:
+            for raw in source:
+                if not raw.strip():
+                    continue
+                row = json.loads(raw)
+                record = {
+                    "epoch": row.get("epoch"),
+                    "step": row.get("step"),
+                    "key": row.get("key"),
+                    "timestep": row.get("t", row.get("timestep")),
+                }
+                order_record = {"epoch": record["epoch"], "step": record["step"], "key": record["key"]}
+                encoded = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                encoded_order = json.dumps(order_record, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+                digest.update(encoded + b"\n")
+                order_digest.update(encoded_order + b"\n")
+                count += 1
+                if first is None:
+                    first = record
+                last = record
+    except (OSError, json.JSONDecodeError):
+        return None
+    value = {
+        "schema_version": 1,
+        "created_at": _now(),
+        "seed": int(seed),
+        "record_count": count,
+        "bucket_order": "seeded_per_epoch",
+        "image_order_sha256": order_digest.hexdigest(),
+        "image_timestep_schedule_sha256": digest.hexdigest(),
+        "first_observation": first,
+        "last_observation": last,
+        "rng_policy": "Upstream torch global RNG is seeded by --seed; dataset order is isolated by Fizgig's seeded bucket sampler. Training noise/timestep RNG is not yet a separately isolated stream.",
+    }
+    _write_json(run_dir / "schedule_manifest.json", value)
+    return value
 
 
 class TrainingRuntime:
@@ -96,10 +146,6 @@ class TrainingRuntime:
         if run.get("status") != "prepared":
             raise ValueError(f"Only a prepared run can be started; this run is {run.get('status', 'unknown')}")
 
-        # Preparation snapshots exact SHA-256s and paths for every core training weight. Check
-        # those same files again before launching any command. The commands below also use these
-        # frozen paths rather than current Preferences, so changing the app's selected model after
-        # preparation cannot silently change an already-prepared experiment.
         model_manifest = run.get("model_manifest")
         if not isinstance(model_manifest, dict):
             raise ValueError("This prepared run predates training-model fingerprinting. Prepare a new run before training.")
@@ -110,14 +156,12 @@ class TrainingRuntime:
         if batch_size != 1:
             raise ValueError("The telemetry baseline requires Krea 2 batch size 1 so each loss observation maps to one image")
 
+        seed = int(run.get("config", {}).get("training", {}).get("seed", 42) or 42)
         key = (project_id, run_id)
         with self._lock:
             existing = self._threads.get(key)
             if existing and existing.is_alive():
                 raise ValueError("Run worker is already active")
-            # Publish STARTING before returning from the API. That makes the browser's first
-            # response authoritative and guarantees its live polling starts even if the worker
-            # thread has not reached Python scheduling yet.
             self._set_status(
                 project_id,
                 run_id,
@@ -125,6 +169,12 @@ class TrainingRuntime:
                 started_at=_now(),
                 software=software_snapshot(),
                 telemetry_mode="observation_only",
+                reproducibility={
+                    "seed": seed,
+                    "bucket_order": "seeded_per_epoch",
+                    "python_hash_seed": seed,
+                    "training_rng": "upstream_torch_global_seed",
+                },
             )
             worker = threading.Thread(target=self._worker, args=(project_id, run_id), daemon=True, name=f"fizgig-{run_id}")
             self._threads[key] = worker
@@ -217,8 +267,6 @@ class TrainingRuntime:
             "--max_grad_norm", str(float(optimizer.get("max_grad_norm", 1.0) or 0.0)),
             "--optimizer_type", str(optimizer.get("type", "adamw")),
             "--compile_blocks", str(runtime.get("compile_blocks", "auto")),
-            # Observation-only: this writes the raw per-image log and current verdicts but does
-            # not apply per-image LR or rewrite/exclude anything on our behalf.
             "--log_per_image_loss",
         ]
 
@@ -276,10 +324,21 @@ class TrainingRuntime:
             _write_json(run_dir / "commands.json", {"created_at": _now(), "commands": [{"stage": stage, "argv": argv} for stage, argv in commands]})
             _append_jsonl(run_dir / "events.jsonl", {"time": _now(), "type": "training_baseline_started", "software": software, "mode": "observation_only"})
 
+            seed = int(run.get("config", {}).get("training", {}).get("seed", 42) or 42)
             env = os.environ.copy()
             env["FIZGIG_TELEMETRY_DIR"] = str(run_dir)
             env["FIZGIG_PERIMAGE_LOSS_LOG"] = "1"
+            env["FIZGIG_BUCKET_ORDER"] = "1"
+            env["PYTHONHASHSEED"] = str(seed)
             env["PYTHONUNBUFFERED"] = "1"
+            _append_jsonl(run_dir / "events.jsonl", {
+                "time": _now(),
+                "type": "reproducibility_contract",
+                "seed": seed,
+                "bucket_order": "seeded_per_epoch",
+                "python_hash_seed": seed,
+                "training_rng": "upstream_torch_global_seed",
+            })
 
             for stage, command in commands:
                 self._set_status(project_id, run_id, "training" if stage == "train" else stage)
@@ -287,9 +346,22 @@ class TrainingRuntime:
                 if code != 0:
                     raise RuntimeError(f"{stage} exited with status {code}")
 
+            schedule = _schedule_manifest(run_dir, seed)
             final_path = run_dir / f"{_safe_output_name(project_id, run_id)}.safetensors"
-            completed = self._set_status(project_id, run_id, "completed", completed_at=_now(), final_lora=str(final_path) if final_path.is_file() else None)
-            _append_jsonl(run_dir / "events.jsonl", {"time": _now(), "type": "training_baseline_completed", "final_lora": completed.get("final_lora")})
+            completed = self._set_status(
+                project_id,
+                run_id,
+                "completed",
+                completed_at=_now(),
+                final_lora=str(final_path) if final_path.is_file() else None,
+                schedule_manifest=schedule,
+            )
+            _append_jsonl(run_dir / "events.jsonl", {
+                "time": _now(),
+                "type": "training_baseline_completed",
+                "final_lora": completed.get("final_lora"),
+                "schedule_sha256": schedule.get("image_timestep_schedule_sha256") if schedule else None,
+            })
             if final_path.is_file():
                 try:
                     project_store.register_artifact(project_id, run_id, artifact_type="lora", path=str(final_path), metadata={"telemetry_mode": "observation_only"})
