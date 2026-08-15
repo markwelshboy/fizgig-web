@@ -7,6 +7,7 @@ import {
   projectArchiveUrl,
   type ArchiveComponent,
   type ArchivePreset,
+  type ProjectCloneSuggestion,
   type ProjectExportOptions,
   type ProjectImportInspection,
 } from "./project-transfer-api";
@@ -23,9 +24,10 @@ function formatBytes(value: number) {
   return `${size >= 100 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
 }
 
-function cloneIdentity(id: string, name: string) {
-  const suffix = Math.random().toString(36).slice(2, 7);
-  return { id: `${id}-clean-${suffix}`, name: `${name} clean` };
+function fallbackCloneIdentity(id: string, name: string): ProjectCloneSuggestion {
+  const baseId = id.replace(/-rev\d+$/i, "");
+  const baseName = name.replace(/\s+rev\d+$/i, "");
+  return { id: `${baseId}-rev1`, name: `${baseName} rev1` };
 }
 
 function TriCheckbox({ checked, partial, disabled, onChange }: { checked: boolean; partial: boolean; disabled?: boolean; onChange: (value: boolean) => void }) {
@@ -73,7 +75,7 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
   mode: TransferMode;
   project?: ProjectInfo | null;
   onClose: () => void;
-  onImported?: (project: ProjectInfo) => void;
+  onImported?: (project: ProjectInfo) => void | Promise<void>;
 }) {
   const fileInput = useRef<HTMLInputElement | null>(null);
   const [options, setOptions] = useState<ProjectExportOptions | null>(null);
@@ -103,7 +105,7 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
         setSelected(dependencyClosure(new Set(standard?.components ?? []), value.components));
         setPreset(standard?.id ?? "standard");
         setIdentityMode("preserve");
-        const clone = cloneIdentity(project.id, project.name);
+        const clone = value.suggested_clone ?? fallbackCloneIdentity(project.id, project.name);
         setCloneId(clone.id);
         setCloneName(clone.name);
       })
@@ -120,15 +122,7 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
     const wanted = new Set(nextPreset.components.filter((id) => available.has(id) || id === "project_core" || id === "datasets"));
     setSelected(dependencyClosure(wanted, components));
     setPreset(nextPreset.id);
-    if (nextPreset.id === "clean") {
-      setIdentityMode("clone");
-      const basis = inspection?.project ?? project;
-      if (basis && (!cloneId || identityMode !== "clone")) {
-        const clone = cloneIdentity(basis.id, basis.name);
-        setCloneId(clone.id);
-        setCloneName(clone.name);
-      }
-    }
+    if (nextPreset.id === "clean") setIdentityMode("clone");
   }
 
   function toggleComponent(id: string, checked: boolean) {
@@ -158,7 +152,7 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
       setSelected(dependencyClosure(new Set(intended), value.components));
       const manifestPreset = typeof value.archive_manifest?.preset === "string" ? String(value.archive_manifest.preset) : "standard";
       setPreset(value.presets.some((item) => item.id === manifestPreset) ? manifestPreset : "custom");
-      const clone = cloneIdentity(value.project.id, value.project.name);
+      const clone = value.suggested_clone ?? fallbackCloneIdentity(value.project.id, value.project.name);
       setCloneId(clone.id);
       setCloneName(clone.name);
       setIdentityMode(value.collision ? "clone" : "preserve");
@@ -189,6 +183,10 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
 
   async function beginImport() {
     if (!inspection) return;
+    if (inspection.collision && identityMode === "preserve") {
+      setError(inspection.collision_message || `Project ID ${inspection.project.id} already exists on this pod. Import as a clone instead.`);
+      return;
+    }
     if (identityMode === "clone" && (!cloneId.trim() || !cloneName.trim())) {
       setError("A cloned import needs a new project name and ID.");
       return;
@@ -203,7 +201,7 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
         cloneId: cloneId.trim(),
         cloneName: cloneName.trim(),
       });
-      onImported?.(imported);
+      if (onImported) await onImported(imported);
       onClose();
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : String(exc));
@@ -268,9 +266,12 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
 
         <div className="project-transfer-identity">
           <strong>Project identity</strong>
-          <label><input type="radio" checked={identityMode === "preserve"} onChange={() => setIdentityMode("preserve")} disabled={preset === "clean" || Boolean(inspection?.collision)} /> Preserve existing identity</label>
-          <label><input type="radio" checked={identityMode === "clone"} onChange={() => setIdentityMode("clone")} /> Create as a clone</label>
-          {(preset === "clean" || inspection?.collision) && <small>{preset === "clean" ? "Clean exports are new reusable projects, so they always receive a new identity." : "That project ID already exists on this pod; import it as a clone to avoid a collision."}</small>}
+          <div className="project-transfer-identity-options">
+            <label><input type="radio" checked={identityMode === "preserve"} onChange={() => setIdentityMode("preserve")} disabled={preset === "clean" || Boolean(inspection?.collision)} /> <span>Preserve existing identity</span></label>
+            <label><input type="radio" checked={identityMode === "clone"} onChange={() => setIdentityMode("clone")} /> <span>Create as a clone</span></label>
+          </div>
+          {preset === "clean" && <small>Clean is a reusable copy with no run history, so it always receives a new project identity.</small>}
+          {inspection?.collision && <div className="project-transfer-collision" role="alert"><i className="ti ti-alert-triangle" /><span>{inspection.collision_message || `Project ID ${inspection.project.id} already exists on this pod. Import as a clone to keep both.`}</span></div>}
           {identityMode === "clone" && <div className="project-transfer-clone-grid">
             <label>New project name<input value={cloneName} onChange={(event) => setCloneName(event.target.value)} /></label>
             <label>New project ID<input value={cloneId} onChange={(event) => setCloneId(event.target.value.replace(/[^A-Za-z0-9._-]+/g, "-"))} spellCheck={false} /></label>
@@ -281,11 +282,11 @@ export function ProjectTransferDialog({ mode, project, onClose, onImported }: {
       {error && <div className="notice error project-transfer-error">{error}</div>}
 
       <footer className="project-transfer-footer">
-        <div><span>Selected size</span><strong>{formatBytes(estimatedBytes)}</strong><small>uncompressed project bytes · archive compression varies</small></div>
+        <div><span>Projected project size</span><strong>{formatBytes(estimatedBytes)}</strong><small>archive compression varies</small></div>
         <div className="actions">
           <button type="button" className="secondary" onClick={onClose}>Cancel</button>
           {mode === "export" && options && <button type="button" className="primary" onClick={beginExport}>Export selection</button>}
-          {mode === "import" && inspection && <button type="button" className="primary" disabled={busy} onClick={() => void beginImport()}>{busy ? "Importing…" : "Import selection"}</button>}
+          {mode === "import" && inspection && <button type="button" className="primary" disabled={busy || (inspection.collision && identityMode === "preserve")} onClick={() => void beginImport()}>{busy ? "Importing…" : "Import selection"}</button>}
         </div>
       </footer>
     </section>
