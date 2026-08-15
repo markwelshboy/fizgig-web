@@ -1,0 +1,97 @@
+/* Tabler icon polish. Loaded last so these presentation-only replacements win over legacy glyph styling. */
+
+.caption-browser-chevron {
+  width: 21px;
+  height: 21px;
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 21px;
+  font-size: 0 !important;
+  line-height: 1;
+}
+
+.caption-browser-chevron::before {
+  content: "\f627"; /* ti-square-chevron-down */
+  font-family: "tabler-icons" !important;
+  speak: none;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  font-size: 19px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Preserve the established caption-status palette; only replace the old text/dot glyphs. */
+.caption-status-glyph.ai,
+.caption-status-glyph.manual,
+.caption-status-glyph.saved,
+.caption-status-glyph.trigger,
+.caption-status-glyph.protected,
+.caption-status-glyph.unknown,
+.caption-status-dot.missing {
+  font-size: 0 !important;
+}
+
+.caption-status-glyph.ai::before,
+.caption-status-glyph.manual::before,
+.caption-status-glyph.saved::before,
+.caption-status-glyph.trigger::before,
+.caption-status-glyph.protected::before,
+.caption-status-glyph.unknown::before,
+.caption-status-dot.missing::before {
+  font-family: "tabler-icons" !important;
+  speak: none;
+  font-style: normal;
+  font-weight: normal;
+  font-variant: normal;
+  text-transform: none;
+  font-size: 14px;
+  line-height: 1;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.caption-status-glyph.ai::before { content: "\fa27"; }       /* ti-file-text-ai */
+.caption-status-glyph.manual::before { content: "\f039"; }   /* ti-file-pencil */
+.caption-status-glyph.saved::before { content: "\ec91"; }    /* ti-file-upload */
+.caption-status-dot.missing::before { content: "\f96c"; }    /* ti-message-2-x */
+.caption-status-glyph.trigger::before { content: "\f48f"; }  /* ti-square-letter-t */
+.caption-status-glyph.protected::before { content: "\eae2"; }/* ti-lock */
+.caption-status-glyph.unknown::before { content: "\edeb"; }  /* ti-zoom-question */
+
+.caption-status-dot.missing {
+  width: 19px;
+  min-width: 19px;
+  height: 19px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  border: 1px solid rgba(248, 113, 113, .72);
+  color: #fecaca;
+  background: rgba(127, 29, 29, .9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .35);
+}
+
+/* A missing/case-mismatched trigger is a hard red diagnostic, distinct from amber review warnings. */
+.caption-status-glyph.trigger {
+  border-color: rgba(248, 113, 113, .78);
+  color: #fecaca;
+  background: rgba(127, 29, 29, .92);
+}
+
+.caption-full-status-badges .caption-status-glyph::before,
+.caption-full-status-badges .caption-status-dot.missing::before {
+  font-size: 17px;
+}
+
+.caption-full-status-badges .caption-status-dot.missing {
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  min-height: 24px;
+}
