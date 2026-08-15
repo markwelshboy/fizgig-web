@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from .projects import project_store
@@ -14,6 +14,13 @@ from .training_runtime import training_runtime
 from .training_telemetry import snapshot as training_telemetry_snapshot
 
 router = APIRouter(prefix="/api/projects", tags=["sampling", "training"])
+
+_SAMPLE_MEDIA_TYPES = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+}
 
 
 def _now() -> str:
@@ -132,3 +139,42 @@ def training_telemetry(project_id: str, run_id: str):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{project_id}/runs/{run_id}/samples/{filename}")
+def training_sample_image(project_id: str, run_id: str, filename: str) -> Response:
+    """Serve a generated preview image from a run-owned sample directory.
+
+    Fizgig currently writes Krea previews to ``sample`` (singular); older web
+    scaffolding also created ``samples``. Only a direct basename with a supported
+    image extension can be read, and the resolved path must remain inside the run.
+    """
+    if filename != Path(filename).name:
+        raise HTTPException(status_code=400, detail="Invalid sample filename")
+    media_type = _SAMPLE_MEDIA_TYPES.get(Path(filename).suffix.lower())
+    if media_type is None:
+        raise HTTPException(status_code=404, detail="Unknown sample image")
+
+    try:
+        run = project_store.get_run(project_id, run_id)
+        project_dir = project_store.project_dir(project_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    run_dir = Path(str(run.get("output_dir") or "")).resolve()
+    if project_dir not in run_dir.parents:
+        raise HTTPException(status_code=400, detail="Run output path is outside the project")
+
+    for directory_name in ("sample", "samples"):
+        directory = (run_dir / directory_name).resolve()
+        candidate = (directory / filename).resolve()
+        if candidate.parent != directory:
+            continue
+        if candidate.is_file():
+            try:
+                content = candidate.read_bytes()
+            except OSError as exc:
+                raise HTTPException(status_code=500, detail=f"Unable to read sample image: {exc}") from exc
+            return Response(content=content, media_type=media_type, headers={"Cache-Control": "no-store"})
+
+    raise HTTPException(status_code=404, detail="Unknown sample image")
