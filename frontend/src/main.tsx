@@ -29,6 +29,7 @@ import "./training-harness.css";
 import "./training-telemetry.css";
 import "./training-run-review.css";
 import "./preferences.css";
+import "./tabler-icon-tuneups.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
