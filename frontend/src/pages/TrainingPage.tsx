@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   getImagePrepState,
@@ -9,6 +9,7 @@ import {
   prepareRun,
   type ImagePrepState,
   type ProjectRevisionPolicy,
+  type RunInfo,
   type TrainingFilenameState,
 } from "../api";
 import { getCaptionMethodologies, type CaptionMethodologyPayload } from "../caption-methodologies-api";
@@ -131,6 +132,19 @@ export function TrainingPage() {
     revision: revision?.id || "revision",
   };
   const wandbRunPreview = renderRunPattern(effectiveWandbPattern, runPatternValues);
+
+  const syncRun = useCallback((nextRun: RunInfo) => {
+    setRun(nextRun);
+    setProject((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        current_run: nextRun.id,
+        updated_at: nextRun.updated_at ?? current.updated_at,
+        runs: current.runs.map((item) => item.id === nextRun.id ? { ...item, status: nextRun.status } : item),
+      };
+    });
+  }, [setProject, setRun]);
 
   useEffect(() => {
     if (!project || !revision) {
@@ -493,25 +507,18 @@ export function TrainingPage() {
       {!canPrepare && <div className="training-blockers">
         {readiness.total === 0 && <span>No included training images.</span>}
         {readiness.missing > 0 && <span>{readiness.missing} included image{readiness.missing === 1 ? " has" : "s have"} no saved caption.</span>}
-        {trainingModelState === null && <span>Checking {modelLabel(activeModelFamily)} training model readiness…</span>}
-        {trainingModelState !== null && !trainingFilesReady && <span>{modelLabel(activeModelFamily)} core training models are not ready. Configure them in Preferences → Models.</span>}
-        {trainingModelState !== null && trainingFilesReady && !trainingFingerprintsReady && <span>Computing SHA-256 fingerprints for the {modelLabel(activeModelFamily)} core weights. Run preparation unlocks automatically when verification completes.</span>}
-        {preparing && <span>Preparing run snapshot…</span>}
+        {trainingModelState !== null && !trainingFilesReady && <span>{modelLabel(activeModelFamily)} core training models are not ready. <button className="training-inline-link" type="button" onClick={() => navigate("/preferences#training-models")}>Configure Models</button></span>}
+        {trainingModelState !== null && trainingFilesReady && !trainingFingerprintsReady && <span>{modelLabel(activeModelFamily)} model SHA-256 verification is still running. Prepare stays disabled until the exact core weights are fingerprinted.</span>}
       </div>}
 
       <div className="training-prepare-summary">
         <div><span>Dataset revision</span><strong>{revision.id}</strong></div>
         <div><span>Images</span><strong>{readiness.total}</strong></div>
         <div><span>Trigger</span><strong>{activeTrigger || "—"}</strong></div>
-        <div><span>Model identity</span><strong>{trainingModelsReady ? "SHA-256 verified" : "Pending"}</strong></div>
+        <div><span>Model identity</span><strong>{trainingModelsReady ? "SHA-256 verified" : trainingFilesReady ? "Hashing…" : "Not ready"}</strong></div>
         <div><span>Telemetry mode</span><strong>Observer only</strong></div>
       </div>
-
-      <div className="actions">
-        <button className="secondary" onClick={() => navigate("/samples")}>Back to Sampling</button>
-        {!trainingFilesReady && trainingModelState !== null && <button className="secondary" onClick={() => navigate("/preferences#training-models")}>Configure Models</button>}
-        <button className="primary" disabled={!canPrepare} onClick={() => void onPrepareRun()}>{preparing ? "Preparing…" : "Prepare Training Run"}</button>
-      </div>
+      <div className="actions"><button className="secondary" onClick={() => navigate("/samples")}>Back to Sampling</button><button className="primary" onClick={onPrepareRun} disabled={!canPrepare}>{preparing ? "Preparing…" : "Prepare Training Run"}</button></div>
     </section>
 
     {run && <section className="panel stack training-prepared-run">
@@ -527,7 +534,7 @@ export function TrainingPage() {
       <p className="muted">The dataset, model SHA-256 manifest and configuration snapshot are project-owned. The trainer is launched as a separate explicit action below; its console, metrics and decision stream stay with this run.</p>
     </section>}
 
-    {run ? <TrainingTelemetryPanel projectId={project.id} run={run} onRunChange={setRun} onError={setError} /> : <section className="panel stack training-telemetry-panel">
+    {run ? <TrainingTelemetryPanel projectId={project.id} run={run} onRunChange={syncRun} onError={setError} /> : <section className="panel stack training-telemetry-panel">
       <div className="training-section-heading">
         <div><p className="eyebrow">Observer baseline</p><div className="card-title">Training Telemetry</div></div>
         <span className="muted">Prepare a run first</span>
