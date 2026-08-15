@@ -91,20 +91,46 @@ def _schedule_manifest(run_dir: Path, seed: int) -> dict[str, Any] | None:
         "image_timestep_schedule_sha256": digest.hexdigest(),
         "first_observation": first,
         "last_observation": last,
-        "rng_policy": "Upstream torch global RNG is seeded by --seed; dataset order is isolated by Fizgig's seeded bucket sampler. Training noise/timestep RNG is not yet a separately isolated stream.",
+        "rng_policy": "Upstream torch global RNG is seeded by --seed; dataset order is isolated by Fizgig's seeded bucket sampler. Training noise/timestep RNG remains Fizgig's upstream global RNG.",
     }
     _write_json(run_dir / "schedule_manifest.json", value)
     return value
 
 
-class TrainingRuntime:
-    """Launch a prepared run in observation-only mode.
+def _read_sampling_plan(project_dir: Path) -> dict[str, Any]:
+    path = project_dir / "sampling_plan.json"
+    if not path.is_file():
+        return {
+            "schema_version": 1,
+            "enabled": False,
+            "schedule": {"sample_at_start": False, "every_n_epochs": 0, "every_n_steps": 0},
+            "renderer": {"use_distilled": True, "steps": 8, "negative_prompt": "", "flow_shift": None},
+            "samples": [],
+        }
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Project sampling plan is invalid: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Project sampling plan must contain an object")
+    return value
 
-    This deliberately wires the stock Fizgig pipeline first: cache latents, cache text, train.
-    Per-image telemetry is enabled, but the harness does NOT yet enable per-image LR, automatic
-    recaptioning, look-outlier warm-up, or policy overrides. That lets us compare the web harness
-    against an equivalent ordinary Fizgig command before allowing the harness to shape a run.
-    """
+
+def _same_number(values: list[Any], label: str) -> float:
+    numbers = [float(value) for value in values]
+    if not numbers:
+        raise ValueError(f"Sampling requires at least one {label}")
+    first = numbers[0]
+    if any(abs(value - first) > 1e-9 for value in numbers[1:]):
+        raise ValueError(
+            f"Krea 2 standalone previews use one shared {label} for the whole prompt set. "
+            f"Make all configured samples use the same {label} before starting training."
+        )
+    return first
+
+
+class TrainingRuntime:
+    """Launch a prepared run in observation-only mode using stock Fizgig entry points."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -139,8 +165,142 @@ class TrainingRuntime:
             alive = bool(self._threads.get((project_id, run_id)) and self._threads[(project_id, run_id)].is_alive())
         return {"run": run, "worker_alive": alive}
 
+    def _sampling_snapshot(self, project_id: str, run: dict[str, Any], run_dir: Path, project_dir: Path) -> dict[str, Any]:
+        """Freeze the project sampling plan at launch and map it only to stock Krea CLI options.
+
+        Fizgig's current Krea preview CLI renders one prompt set with a shared width/height/CFG
+        and a base seed that becomes seed+i. We deliberately reject richer web-plan combinations
+        instead of silently changing the standalone trainer's semantics.
+        """
+        plan = _read_sampling_plan(project_dir)
+        samples = plan.get("samples") if isinstance(plan.get("samples"), list) else []
+        schedule = plan.get("schedule") if isinstance(plan.get("schedule"), dict) else {}
+        renderer = plan.get("renderer") if isinstance(plan.get("renderer"), dict) else {}
+        enabled = bool(plan.get("enabled")) and bool(samples)
+        sample_at_start = bool(schedule.get("sample_at_start"))
+        every_n_epochs = int(schedule.get("every_n_epochs", 0) or 0)
+        every_n_steps = int(schedule.get("every_n_steps", 0) or 0)
+        active = enabled and (sample_at_start or every_n_epochs > 0 or every_n_steps > 0)
+
+        snapshot: dict[str, Any] = {
+            "schema_version": 1,
+            "captured_at": _now(),
+            "engine": "stock_fizgig_krea2_preview_cli",
+            "active": active,
+            "project_plan": plan,
+            "resolved_prompts": [],
+            "preview_model": None,
+        }
+        if not active:
+            _write_json(run_dir / "sampling_snapshot.json", snapshot)
+            return snapshot
+
+        if every_n_steps:
+            raise ValueError(
+                "Krea 2 standalone training previews currently support epoch cadence, not every-N-step sampling. "
+                "Set Every N steps to 0 on the Sampling page."
+            )
+        if renderer.get("use_distilled", True) is not True:
+            raise ValueError(
+                "Krea 2 in-training previews currently use Fizgig's distilled/Turbo preview path. "
+                "Enable distilled / turbo sampling on the Sampling page."
+            )
+        if renderer.get("flow_shift") is not None:
+            raise ValueError(
+                "Krea 2 standalone in-training previews do not expose a custom preview Flow Shift. "
+                "Clear Flow Shift on the Sampling page to use Fizgig's stock preview behavior."
+            )
+
+        widths = [sample.get("width", 1024) for sample in samples if isinstance(sample, dict)]
+        heights = [sample.get("height", 1024) for sample in samples if isinstance(sample, dict)]
+        cfgs = [sample.get("cfg_scale", 1.0) for sample in samples if isinstance(sample, dict)]
+        if len(widths) != len(samples):
+            raise ValueError("Sampling plan contains an invalid sample definition")
+        width = int(_same_number(widths, "width"))
+        height = int(_same_number(heights, "height"))
+        cfg_scale = float(_same_number(cfgs, "CFG scale"))
+
+        seeds = [int(sample.get("seed", 42) or 0) for sample in samples]
+        base_seed = seeds[0]
+        expected_seeds = [base_seed + index for index in range(len(seeds))]
+        if seeds != expected_seeds:
+            raise ValueError(
+                "Krea 2 standalone previews use one base seed and render prompt i with seed+i. "
+                f"For this set, use seeds {expected_seeds[0]} through {expected_seeds[-1]} in prompt order."
+            )
+
+        trigger = str(run.get("trigger_word") or "").strip()
+        prompts: list[str] = []
+        for sample in samples:
+            prompt = str(sample.get("prompt_template") or "").strip()
+            if not prompt:
+                raise ValueError("Every enabled sampling definition needs a prompt")
+            prompts.append(prompt.replace("__trigger__", trigger))
+        prompts_path = run_dir / "sample_prompts.txt"
+        prompts_path.write_text("\n".join(prompts) + "\n", encoding="utf-8")
+
+        # Preview support weights are not part of the core training-model readiness gate, but a
+        # preview-enabled run still needs their exact bytes identified. Reuse the same persisted
+        # SHA state that Preferences shows and verify it before the trainer launches.
+        from .model_downloads import model_download_manager
+        state = model_download_manager.training_state()
+        family = next((item for item in state.get("families", []) if item.get("id") == "krea2"), None)
+        preview_asset = next(
+            (item for item in (family or {}).get("assets", []) if item.get("key") == "krea2_turbo_dit"),
+            None,
+        )
+        if not isinstance(preview_asset, dict) or not preview_asset.get("exists"):
+            raise ValueError("Krea 2 sampling is enabled but the Turbo DiT preview model is missing. Download / verify the Krea 2 model bundle first.")
+        if not preview_asset.get("verified") or not preview_asset.get("sha256"):
+            raise ValueError("Krea 2 sampling is enabled but the Turbo DiT SHA-256 verification is still pending. Wait for model verification before starting the run.")
+        preview_manifest = {
+            "schema_version": 1,
+            "algorithm": "sha256",
+            "family": "krea2",
+            "family_name": "Krea 2",
+            "captured_at": _now(),
+            "assets": [{
+                "key": "krea2_turbo_dit",
+                "label": preview_asset.get("label"),
+                "repo": preview_asset.get("repo"),
+                "filename": preview_asset.get("filename"),
+                "path": preview_asset.get("path"),
+                "sha256": preview_asset.get("sha256"),
+                "core": False,
+            }],
+        }
+        model_download_manager.verify_manifest(preview_manifest)
+
+        snapshot.update({
+            "resolved_prompts": prompts,
+            "prompts_file": str(prompts_path),
+            "preview_model": preview_manifest,
+            "stock_options": {
+                "sample_at_start": sample_at_start,
+                "every_n_epochs": every_n_epochs,
+                "width": width,
+                "height": height,
+                "steps": int(renderer.get("steps", 8) or 8),
+                "cfg_scale": cfg_scale,
+                "negative_prompt": str(renderer.get("negative_prompt") or ""),
+                "base_seed": base_seed,
+                "seed_rule": "base_seed + prompt_index",
+            },
+        })
+        _write_json(run_dir / "sampling_snapshot.json", snapshot)
+        _write_json(run_dir / "sampling_model_manifest.json", preview_manifest)
+        _append_jsonl(run_dir / "events.jsonl", {
+            "time": _now(),
+            "type": "sampling_snapshot_captured",
+            "sample_count": len(prompts),
+            "sample_at_start": sample_at_start,
+            "every_n_epochs": every_n_epochs,
+            "preview_model_sha256": preview_asset.get("sha256"),
+        })
+        return snapshot
+
     def start(self, project_id: str, run_id: str) -> dict[str, Any]:
-        run, _, _ = self._run_paths(project_id, run_id)
+        run, run_dir, project_dir = self._run_paths(project_id, run_id)
         if run.get("model_family") != "krea2":
             raise ValueError("Observer-first trainer wiring currently supports Krea 2 only")
         if run.get("status") != "prepared":
@@ -156,6 +316,7 @@ class TrainingRuntime:
         if batch_size != 1:
             raise ValueError("The telemetry baseline requires Krea 2 batch size 1 so each loss observation maps to one image")
 
+        sampling_snapshot = self._sampling_snapshot(project_id, run, run_dir, project_dir)
         seed = int(run.get("config", {}).get("training", {}).get("seed", 42) or 42)
         key = (project_id, run_id)
         with self._lock:
@@ -169,6 +330,7 @@ class TrainingRuntime:
                 started_at=_now(),
                 software=software_snapshot(),
                 telemetry_mode="observation_only",
+                sampling_snapshot=sampling_snapshot,
                 reproducibility={
                     "seed": seed,
                     "bucket_order": "seeded_per_epoch",
@@ -290,6 +452,35 @@ class TrainingRuntime:
             ]
         else:
             train += ["--learning_rate", str(float(lr.get("lr", 1e-4) or 1e-4))]
+
+        sampling = run.get("sampling_snapshot")
+        if isinstance(sampling, dict) and sampling.get("active"):
+            stock = sampling.get("stock_options") if isinstance(sampling.get("stock_options"), dict) else {}
+            preview_manifest = sampling.get("preview_model") if isinstance(sampling.get("preview_model"), dict) else {}
+            preview_asset = next(
+                (asset for asset in preview_manifest.get("assets", []) if isinstance(asset, dict) and asset.get("key") == "krea2_turbo_dit"),
+                None,
+            )
+            turbo_dit = str((preview_asset or {}).get("path") or "")
+            if not turbo_dit or not Path(turbo_dit).is_file():
+                raise ValueError("Prepared Krea 2 preview Turbo path is missing")
+            train += [
+                "--turbo_dit", turbo_dit,
+                "--vae", vae,
+                "--text_encoder", text_encoder,
+                "--sample_prompts", str(sampling.get("prompts_file")),
+                "--sample_every_n_epochs", str(int(stock.get("every_n_epochs", 0) or 0)),
+                "--sample_width", str(int(stock.get("width", 1024) or 1024)),
+                "--sample_height", str(int(stock.get("height", 1024) or 1024)),
+                "--sample_steps", str(int(stock.get("steps", 8) or 8)),
+                "--sample_cfg_scale", str(float(stock.get("cfg_scale", 1.0) or 1.0)),
+                "--sample_seed", str(int(stock.get("base_seed", 42) or 0)),
+            ]
+            if bool(stock.get("sample_at_start")):
+                train.append("--sample_at_first")
+            negative = str(stock.get("negative_prompt") or "").strip()
+            if float(stock.get("cfg_scale", 1.0) or 1.0) > 1.0 and negative:
+                train += ["--sample_negative", negative]
 
         return [("cache_latents", cache_latents), ("cache_text", cache_text), ("train", train)]
 
