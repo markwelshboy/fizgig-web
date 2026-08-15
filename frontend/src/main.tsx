@@ -26,6 +26,7 @@ import "./runtime-notification.css";
 import "./caption-sampling-polish.css";
 import "./training-harness.css";
 import "./training-telemetry.css";
+import "./training-run-review.css";
 import "./preferences.css";
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
