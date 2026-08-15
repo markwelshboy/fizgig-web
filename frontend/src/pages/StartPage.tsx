@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createProject, createProjectRevision, getProjectRevision, importProjectArchive, inspectDataset, listProjects, projectExportUrl, uploadSourceArchive, type DatasetInfo, type ProjectInfo } from "../api";
+import { createProject, createProjectRevision, getProjectRevision, inspectDataset, listProjects, uploadSourceArchive, type DatasetInfo, type ProjectInfo } from "../api";
 import { useSession } from "../session";
 
 const DISMISSED_RECENTS_KEY = "fizgig.dismissedRecentProjects";
@@ -25,10 +25,14 @@ function wildcardMatches(filename: string, pattern: string) {
   catch { return filename.toLowerCase().includes(value.toLowerCase()); }
 }
 
-export function StartPage() {
+type StartPageProps = {
+  onImportProject?: () => void;
+  onExportProject?: () => void;
+};
+
+export function StartPage({ onImportProject, onExportProject }: StartPageProps = {}) {
   const navigate = useNavigate();
   const sourceArchiveInput = useRef<HTMLInputElement | null>(null);
-  const projectArchiveInput = useRef<HTMLInputElement | null>(null);
   const projectNameInput = useRef<HTMLInputElement | null>(null);
   const { project, setProject, revision, setRevision, setRun, dataset, setDataset, modelFamily, setModelFamily, triggerWord, setTriggerWord } = useSession();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
@@ -46,11 +50,21 @@ export function StartPage() {
   const [transferMessage, setTransferMessage] = useState("");
 
   useEffect(() => {
-    listProjects().then((items) => {
-      setProjects(items);
-      const existingNames = new Set(items.map((item) => item.name.trim().toLowerCase()));
-      setProjectName((current) => existingNames.has(current.trim().toLowerCase()) ? makeProjectName(existingNames) : current);
-    }).catch(() => undefined);
+    let cancelled = false;
+    const refresh = () => {
+      listProjects().then((items) => {
+        if (cancelled) return;
+        setProjects(items);
+        const existingNames = new Set(items.map((item) => item.name.trim().toLowerCase()));
+        setProjectName((current) => existingNames.has(current.trim().toLowerCase()) ? makeProjectName(existingNames) : current);
+      }).catch(() => undefined);
+    };
+    refresh();
+    window.addEventListener("fizgig-projects-changed", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("fizgig-projects-changed", refresh);
+    };
   }, []);
   const recentProjects = useMemo(() => projects.filter((item) => !dismissedRecents.has(item.id)), [projects, dismissedRecents]);
   const duplicateName = projectName.trim() && projects.some((item) => item.name.trim().toLowerCase() === projectName.trim().toLowerCase());
@@ -121,23 +135,6 @@ export function StartPage() {
     } finally {
       setLoading(false);
       if (sourceArchiveInput.current) sourceArchiveInput.current.value = "";
-    }
-  }
-
-  async function onProjectArchive(file: File) {
-    setLoading(true); setError(""); setTransferMessage(`Importing ${file.name}…`);
-    try {
-      const imported = await importProjectArchive(file);
-      const refreshedProjects = await listProjects();
-      setProjects(refreshedProjects);
-      setTransferMessage(`Imported project ${imported.name}.`);
-      await openProject(refreshedProjects.find((item) => item.id === imported.id) ?? imported);
-    } catch (err) {
-      setTransferMessage("");
-      setError(err instanceof Error ? err.message : "Unable to import project archive");
-    } finally {
-      setLoading(false);
-      if (projectArchiveInput.current) projectArchiveInput.current.value = "";
     }
   }
 
@@ -238,9 +235,8 @@ export function StartPage() {
         </section>
 
         <section className="panel import-project-panel">
-          <div><div className="card-title">Import Project</div><p className="muted">Open a complete Fizgig project archive from another pod.</p></div>
-          <button type="button" className="secondary project-import-button" disabled={loading} onClick={() => projectArchiveInput.current?.click()}>{loading ? "Working…" : "Open Project Archive"}</button>
-          <input ref={projectArchiveInput} className="visually-hidden-file" type="file" accept=".zip,.tar,.tar.gz,.tgz,application/zip,application/gzip,application/x-tar" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (file) void onProjectArchive(file); }} />
+          <div><div className="card-title">Import Project</div><p className="muted">Inspect an archive, choose what to bring in, and resolve project identity before anything is written.</p></div>
+          <button type="button" className="secondary project-import-button" disabled={loading || !onImportProject} onClick={onImportProject}>Open Project Archive</button>
         </section>
       </div>
     </>}
@@ -250,7 +246,7 @@ export function StartPage() {
 
     {project && <>
       <section className="panel stack project-source-panel">
-        <div className="prep-section-heading"><div className="card-title">Project Source</div><a className="secondary archive-download-link" href={projectExportUrl(project.id)}>Download Project Archive</a></div>
+        <div className="prep-section-heading"><div className="card-title">Project Source</div><button type="button" className="secondary archive-download-link" onClick={onExportProject} disabled={!onExportProject}>Export Project</button></div>
         <div className="summary-ledger project-source-ledger">
           <div><span>Project ID</span><strong>{project.id}</strong><small>immutable provenance key</small></div>
           <div><span>Source Training Assets</span><strong>{project.external_source.path}</strong><small>golden source · read-only to Fizgig</small></div>
