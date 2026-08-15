@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import deque
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
 from .projects import project_store
+
+
+_SAMPLE_NAME_RE = re.compile(
+    r"_e(?P<epoch>\d{6})_(?P<index>\d{2})_(?P<timestamp>\d{14})_(?P<seed>\d+)\.(?P<ext>png|jpe?g|webp)$",
+    re.IGNORECASE,
+)
+_SAMPLE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _read_jsonl(path: Path, limit: int) -> list[dict[str, Any]]:
@@ -82,6 +90,46 @@ def _asset_metadata(project_id: str, run: dict[str, Any], run_dir: Path) -> list
     return rows
 
 
+def _sample_metadata(project_id: str, run_id: str, run_dir: Path) -> list[dict[str, Any]]:
+    """List Fizgig preview images without exposing arbitrary run-local paths.
+
+    Upstream Krea writes previews to ``<output_dir>/sample`` (singular), while
+    early web project scaffolding created ``samples``. Scan both so imported old
+    runs and future runs render consistently. The standard Fizgig filename embeds
+    epoch, prompt index, timestamp and seed; unknown image names are still shown.
+    """
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for directory_name in ("sample", "samples"):
+        directory = run_dir / directory_name
+        if not directory.is_dir():
+            continue
+        for path in sorted(directory.iterdir(), key=lambda item: (item.stat().st_mtime_ns if item.is_file() else 0, item.name)):
+            if not path.is_file() or path.suffix.lower() not in _SAMPLE_EXTENSIONS or path.name in seen:
+                continue
+            seen.add(path.name)
+            match = _SAMPLE_NAME_RE.search(path.name)
+            rows.append({
+                "filename": path.name,
+                "epoch": int(match.group("epoch")) if match else None,
+                "sample_index": int(match.group("index")) if match else None,
+                "seed": int(match.group("seed")) if match else None,
+                "timestamp": match.group("timestamp") if match else None,
+                "source_dir": directory_name,
+                "url": (
+                    f"/api/projects/{quote(project_id, safe='')}/runs/{quote(run_id, safe='')}"
+                    f"/samples/{quote(path.name, safe='')}"
+                ),
+            })
+    rows.sort(key=lambda row: (
+        row["epoch"] if isinstance(row.get("epoch"), int) else -1,
+        row["sample_index"] if isinstance(row.get("sample_index"), int) else -1,
+        str(row.get("timestamp") or ""),
+        str(row.get("filename") or ""),
+    ))
+    return rows
+
+
 def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
     run = project_store.get_run(project_id, run_id)
     run_dir = Path(run["output_dir"]).resolve()
@@ -128,5 +176,6 @@ def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
         "problem_images": current_problem_state,
         "events": events,
         "assets": _asset_metadata(project_id, run, run_dir),
+        "samples": _sample_metadata(project_id, run_id, run_dir),
         "console_tail": _console_tail(console_path),
     }
