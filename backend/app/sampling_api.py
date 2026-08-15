@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import signal
+import threading
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -21,6 +25,8 @@ _SAMPLE_MEDIA_TYPES = {
     ".jpeg": "image/jpeg",
     ".webp": "image/webp",
 }
+_ACTIVE_RUN_STATES = {"starting", "cache_latents", "cache_text", "training", "stopping"}
+_RUN_SCRIPT_MARKERS = ("krea2_cache_latents.py", "krea2_cache_text.py", "krea2_train.py")
 
 
 def _now() -> str:
@@ -80,8 +86,132 @@ def _path(project_id: str) -> Path:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
+def _normalize_sampling_plan(value: dict) -> dict:
+    """Apply the actual stock Krea Turbo preview contract.
+
+    Fizgig's Turbo preview path is the 8-step CFG-free path. Older web plans may
+    still contain generic 40-step / CFG 4.5 values from before the native Krea
+    preview wiring existed. Do not carry those stale generic values into a run.
+    Preserve the negative prompt so it is still available if a future undistilled
+    renderer uses it, but it is intentionally unused while Turbo/CFG-free is on.
+    """
+    normalized = json.loads(json.dumps(value))
+    renderer = normalized.setdefault("renderer", {})
+    if renderer.get("use_distilled", True):
+        renderer["steps"] = 8
+        renderer["flow_shift"] = None
+        for sample in normalized.get("samples", []):
+            if isinstance(sample, dict):
+                sample["cfg_scale"] = 1.0
+    return normalized
+
+
 def _default() -> dict:
-    return SamplingPlan().model_dump()
+    return _normalize_sampling_plan(SamplingPlan().model_dump())
+
+
+def _validated_run_dir(project_id: str, run_id: str) -> tuple[dict, Path, Path]:
+    run = project_store.get_run(project_id, run_id)
+    project_dir = project_store.project_dir(project_id)
+    run_dir = Path(str(run.get("output_dir") or "")).resolve()
+    if project_dir not in run_dir.parents:
+        raise ValueError("Run output path is outside the project")
+    return run, run_dir, project_dir
+
+
+def _run_process_ids(run_dir: Path) -> list[int]:
+    """Find only Fizgig child commands whose argv points at this exact run.
+
+    Cache commands carry the run-local Fizgig_train.toml path and the trainer
+    carries --output_dir, so matching the resolved run directory prevents a stop
+    request for one run from touching another run on the same pod.
+    """
+    proc_root = Path("/proc")
+    if not proc_root.is_dir():
+        return []
+    needle = str(run_dir)
+    result: list[int] = []
+    for entry in proc_root.iterdir():
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        if pid == os.getpid():
+            continue
+        try:
+            raw = (entry / "cmdline").read_bytes()
+        except OSError:
+            continue
+        if not raw:
+            continue
+        command = raw.replace(b"\x00", b" ").decode("utf-8", errors="replace")
+        if needle not in command:
+            continue
+        if not any(marker in command for marker in _RUN_SCRIPT_MARKERS):
+            continue
+        result.append(pid)
+    return result
+
+
+def _signal_run_processes(run_dir: Path, sig: signal.Signals) -> list[int]:
+    signalled: list[int] = []
+    for pid in _run_process_ids(run_dir):
+        try:
+            os.kill(pid, sig)
+            signalled.append(pid)
+        except (ProcessLookupError, PermissionError):
+            continue
+    return signalled
+
+
+def _finalize_stop(project_id: str, run_id: str, run_dir: Path) -> None:
+    """Keep terminating the run-local child until the worker has unwound.
+
+    TrainingRuntime already owns process lifecycle and will briefly classify a
+    SIGTERM exit as failed while its worker unwinds. We wait until that worker is
+    actually dead, then make the user-requested terminal state authoritative.
+    """
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
+        _signal_run_processes(run_dir, signal.SIGTERM)
+        try:
+            status = training_runtime.status(project_id, run_id)
+        except FileNotFoundError:
+            return
+        if not status.get("worker_alive") and not _run_process_ids(run_dir):
+            break
+        time.sleep(0.25)
+    else:
+        _signal_run_processes(run_dir, signal.SIGKILL)
+        hard_deadline = time.monotonic() + 5.0
+        while time.monotonic() < hard_deadline:
+            try:
+                status = training_runtime.status(project_id, run_id)
+            except FileNotFoundError:
+                return
+            if not status.get("worker_alive") and not _run_process_ids(run_dir):
+                break
+            time.sleep(0.2)
+        else:
+            try:
+                project_store.append_run_event(project_id, run_id, "training_stop_timeout", {})
+            except Exception:
+                pass
+            return
+
+    try:
+        stopped = training_runtime._set_status(
+            project_id,
+            run_id,
+            "stopped",
+            stopped_at=_now(),
+            failed_at=None,
+            error=None,
+        )
+        project_store.append_run_event(project_id, run_id, "training_stopped", {"stopped_at": stopped.get("stopped_at")})
+        with (run_dir / "console.log").open("a", encoding="utf-8") as log:
+            log.write(f"[{_now()}] === run stopped by user ===\n")
+    except (FileNotFoundError, ValueError):
+        return
 
 
 @router.get("/{project_id}/sampling-plan")
@@ -90,7 +220,8 @@ def get_sampling_plan(project_id: str):
     if not path.is_file():
         return _default()
     try:
-        return SamplingPlan.model_validate_json(path.read_text(encoding="utf-8")).model_dump()
+        value = SamplingPlan.model_validate_json(path.read_text(encoding="utf-8")).model_dump()
+        return _normalize_sampling_plan(value)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Invalid sampling plan: {exc}") from exc
 
@@ -99,7 +230,7 @@ def get_sampling_plan(project_id: str):
 def update_sampling_plan(project_id: str, request: SamplingPlan):
     project_dir = project_store.project_dir(project_id)
     path = _path(project_id)
-    value = request.model_dump()
+    value = _normalize_sampling_plan(request.model_dump())
     value["schema_version"] = 1
     value["updated_at"] = _now()
     ids = [sample["id"] for sample in value["samples"]]
@@ -120,12 +251,72 @@ def start_training(project_id: str, run_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.post("/{project_id}/runs/{run_id}/training/stop")
+def stop_training(project_id: str, run_id: str):
+    try:
+        run, run_dir, _ = _validated_run_dir(project_id, run_id)
+        status = training_runtime.status(project_id, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if run.get("status") == "stopping":
+        return status
+    if run.get("status") not in _ACTIVE_RUN_STATES and not status.get("worker_alive"):
+        raise HTTPException(status_code=400, detail=f"Run {run_id} is not active; current status is {run.get('status', 'unknown')}")
+
+    requested_at = _now()
+    training_runtime._set_status(project_id, run_id, "stopping", stop_requested_at=requested_at)
+    pids = _signal_run_processes(run_dir, signal.SIGTERM)
+    project_store.append_run_event(project_id, run_id, "training_stop_requested", {"requested_at": requested_at, "pids": pids})
+    threading.Thread(
+        target=_finalize_stop,
+        args=(project_id, run_id, run_dir),
+        daemon=True,
+        name=f"fizgig-stop-{run_id}",
+    ).start()
+    return training_runtime.status(project_id, run_id)
+
+
 @router.get("/{project_id}/runs/{run_id}/training/status")
 def training_status(project_id: str, run_id: str):
     try:
         return training_runtime.status(project_id, run_id)
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.delete("/{project_id}/runs/{run_id}")
+def delete_training_run(project_id: str, run_id: str):
+    """Purge run-owned bytes while retaining a tiny ID tombstone for monotonic IDs."""
+    try:
+        run, run_dir, project_dir = _validated_run_dir(project_id, run_id)
+        runtime_status = training_runtime.status(project_id, run_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if runtime_status.get("worker_alive") or run.get("status") in _ACTIVE_RUN_STATES:
+        raise HTTPException(status_code=409, detail="Stop this run before deleting it.")
+
+    project = project_store.get_project(project_id)
+    summary = next((item for item in project.get("runs", []) if item.get("id") == run_id), None)
+    if summary is None:
+        raise HTTPException(status_code=404, detail=f"Unknown run: {run_id}")
+
+    shutil.rmtree(run_dir, ignore_errors=False)
+    deleted_at = _now()
+    summary["status"] = "deleted"
+    summary["deleted_at"] = deleted_at
+    summary["purged"] = True
+    if project.get("current_run") == run_id:
+        remaining = [item for item in project.get("runs", []) if item.get("status") != "deleted"]
+        project["current_run"] = remaining[-1]["id"] if remaining else None
+    project_store._save_project(project_dir, project)
+    project_store._event(project_dir, "run_deleted", run_id=run_id, deleted_at=deleted_at, previous_status=run.get("status"))
+    return project_store.get_project(project_id)
 
 
 @router.get("/{project_id}/runs/{run_id}/telemetry")
