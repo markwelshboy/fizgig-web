@@ -12,7 +12,7 @@ import { ImagePrepWorkbenchPageV5 } from "./pages/ImagePrepWorkbenchPageV5";
 import { PreferencesPage } from "./pages/PreferencesPage";
 import { SamplesPage } from "./pages/SamplesPage";
 import { StartPage } from "./pages/StartPage";
-import { TrainingPage } from "./pages/TrainingPage";
+import { TrainingPageShell } from "./pages/TrainingPageShell";
 import { useSession } from "./session";
 import { getTrainingModelState, type TrainingModelState } from "./training-models-api";
 
@@ -102,7 +102,7 @@ export default function App() {
           <div><strong>{activeTrainingFamily?.name ?? "Training"} models are not configured.</strong><span>Core DiT, text encoder and VAE weights must be configured before launching this training family.</span></div>
           <button className="secondary" type="button" onClick={() => navigate("/preferences#training-models")}>Setup now</button>
         </div>}
-        <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPage />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
+        <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPageShell />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
       </main>
       {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
     </div>
