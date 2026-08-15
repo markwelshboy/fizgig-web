@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { getRun, getRunTelemetry, type ProjectRunSummary, type TrainingSample } from "../api";
+import { deleteRun, getProject, getRun, getRunTelemetry, stopTraining, type ProjectRunSummary, type TrainingSample } from "../api";
 import { useSession } from "../session";
 import { TrainingPage } from "./TrainingPage";
 
-const ACTIVE_RUN_STATES = new Set(["starting", "cache_latents", "cache_text", "training"]);
+const ACTIVE_RUN_STATES = new Set(["starting", "cache_latents", "cache_text", "training", "stopping"]);
 
 function modelLabel(value: string) {
   if (value === "krea2") return "Krea 2";
@@ -82,7 +82,7 @@ function RunSampleGallery({ projectId, runId, runStatus }: { projectId: string; 
     {!error && loading && !samples.length && <div className="training-sample-empty">Checking the run for generated preview images…</div>}
     {!error && !loading && !samples.length && <div className="training-sample-empty">
       <strong>No generated preview images were recorded for this run.</strong>
-      <span>New Krea runs can now use Fizgig's native in-training preview generator when the project Sampling plan is enabled and compatible with the standalone preview options.</span>
+      <span>New Krea runs can use Fizgig's native in-training preview generator when the project Sampling plan is enabled.</span>
     </div>}
 
     {epochGroups.length > 0 && <div className="training-sample-epochs">
@@ -117,29 +117,66 @@ function RunSampleGallery({ projectId, runId, runStatus }: { projectId: string; 
   </section>;
 }
 
-function RunHistory({ runs, selectedRunId, openingRunId, onReview }: { runs: ProjectRunSummary[]; selectedRunId?: string; openingRunId: string | null; onReview: (runId: string) => void }) {
+type RunHistoryProps = {
+  runs: ProjectRunSummary[];
+  selectedRunId?: string;
+  openingRunId: string | null;
+  actionSelection: Set<string>;
+  deleting: boolean;
+  stoppingRunId: string | null;
+  onReview: (runId: string) => void;
+  onToggle: (runId: string, checked: boolean) => void;
+  onDelete: () => void;
+  onStop: (runId: string) => void;
+};
+
+function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleting, stoppingRunId, onReview, onToggle, onDelete, onStop }: RunHistoryProps) {
+  const selectedCount = actionSelection.size;
   return <section className="panel stack training-run-browser-panel">
-    <div className="training-section-heading">
-      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Its saved configuration also becomes the editable template for the next prepared run.</p></div>
-      <span className="training-samples-count">{runs.length} run{runs.length === 1 ? "" : "s"}</span>
+    <div className="training-section-heading training-run-browser-heading">
+      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Select completed/stopped runs for purge or future comparison.</p></div>
+      <div className="training-run-browser-header-actions">
+        {selectedCount > 0 && <div className="training-run-selection-actions">
+          {selectedCount === 2 && <button type="button" className="secondary" disabled title="Run comparison plumbing is the next step.">Compare</button>}
+          <button type="button" className="danger" disabled={deleting} onClick={onDelete}>{deleting ? "Deleting…" : `Delete ${selectedCount}`}</button>
+        </div>}
+        <span className="training-samples-count">{runs.length} run{runs.length === 1 ? "" : "s"}</span>
+      </div>
     </div>
     <div className="training-run-browser-list">
       {[...runs].reverse().map((item) => {
-        const selected = selectedRunId === item.id;
+        const viewing = selectedRunId === item.id;
         const opening = openingRunId === item.id;
-        return <button type="button" className={`training-run-browser-row ${selected ? "selected" : ""}`} key={item.id} onClick={() => onReview(item.id)} disabled={opening}>
-          <span className="training-run-browser-identity"><strong>{item.id}</strong><span>{item.name}</span><small>Dataset {item.dataset_revision}</small></span>
-          <span className="training-run-browser-status"><span>{item.status}</span><small>{modelLabel(item.model_family)}</small><b>{opening ? "Opening…" : selected ? "Viewing" : "Review"}</b></span>
-        </button>;
+        const active = ACTIVE_RUN_STATES.has(item.status);
+        const stopping = stoppingRunId === item.id || item.status === "stopping";
+        const checked = actionSelection.has(item.id);
+        return <div className={`training-run-browser-row ${viewing ? "selected" : ""} ${checked ? "action-selected" : ""}`} key={item.id}>
+          <button type="button" className="training-run-browser-review" onClick={() => onReview(item.id)} disabled={opening}>
+            <span className="training-run-browser-identity"><strong>{item.id}</strong><span>{item.name}</span><small>Dataset {item.dataset_revision}</small></span>
+            <span className="training-run-browser-status"><span>{item.status}</span><small>{modelLabel(item.model_family)}</small><b>{opening ? "Opening…" : viewing ? "Viewing" : "Review"}</b></span>
+          </button>
+          <div className="training-run-browser-row-actions">
+            {active && <button type="button" className="training-run-stop" disabled={stopping} onClick={() => onStop(item.id)}>{stopping ? "Stopping…" : "Stop"}</button>}
+            <label className={`training-run-select ${active ? "disabled" : ""}`} title={active ? "Stop this run before selecting it for deletion." : "Select run"}>
+              <input type="checkbox" checked={checked} disabled={active || deleting} onChange={(event) => onToggle(item.id, event.target.checked)} />
+              <span className="sr-only">Select {item.id}</span>
+            </label>
+          </div>
+        </div>;
       })}
     </div>
   </section>;
 }
 
 export function TrainingPageShell() {
-  const { project, run, setRun } = useSession();
+  const { project, setProject, run, setRun } = useSession();
   const [openingRunId, setOpeningRunId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState("");
+  const [actionSelection, setActionSelection] = useState<Set<string>>(new Set());
+  const [deleting, setDeleting] = useState(false);
+  const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
+
+  const visibleRuns = useMemo(() => (project?.runs ?? []).filter((item) => item.status !== "deleted"), [project?.runs]);
 
   useEffect(() => {
     if (!project?.current_run || run) return;
@@ -151,6 +188,11 @@ export function TrainingPageShell() {
       .finally(() => { if (!cancelled) setOpeningRunId(null); });
     return () => { cancelled = true; };
   }, [project?.id, project?.current_run, run?.id, setRun]);
+
+  useEffect(() => {
+    const available = new Set(visibleRuns.map((item) => item.id));
+    setActionSelection((current) => new Set([...current].filter((id) => available.has(id))));
+  }, [visibleRuns]);
 
   async function reviewRun(runId: string) {
     if (!project) return;
@@ -169,10 +211,74 @@ export function TrainingPageShell() {
     }
   }
 
+  function toggleRun(runId: string, checked: boolean) {
+    setActionSelection((current) => {
+      const next = new Set(current);
+      if (checked) next.add(runId); else next.delete(runId);
+      return next;
+    });
+  }
+
+  async function stopRun(runId: string) {
+    if (!project) return;
+    const summary = visibleRuns.find((item) => item.id === runId);
+    if (!summary || !ACTIVE_RUN_STATES.has(summary.status)) return;
+    if (!window.confirm(`Stop ${runId}? The active Fizgig process will be terminated. Partial telemetry, checkpoints and generated samples will be preserved.`)) return;
+    setStoppingRunId(runId);
+    setHistoryError("");
+    try {
+      const result = await stopTraining(project.id, runId);
+      if (run?.id === runId) setRun(result.run);
+      const refreshed = await getProject(project.id);
+      setProject(refreshed);
+    } catch (exc) {
+      setHistoryError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setStoppingRunId(null);
+    }
+  }
+
+  async function deleteSelectedRuns() {
+    if (!project || actionSelection.size === 0) return;
+    const ids = [...actionSelection];
+    const label = ids.length === 1 ? ids[0] : `${ids.length} runs`;
+    if (!window.confirm(`Permanently purge ${label}? This removes run-owned telemetry, generated samples, checkpoints/state and final LoRA files. Project assets and dataset revisions are not deleted.`)) return;
+    setDeleting(true);
+    setHistoryError("");
+    try {
+      for (const runId of ids) await deleteRun(project.id, runId);
+      const refreshed = await getProject(project.id);
+      setProject(refreshed);
+      setActionSelection(new Set());
+      if (run && ids.includes(run.id)) {
+        if (refreshed.current_run) {
+          try { setRun(await getRun(project.id, refreshed.current_run)); }
+          catch { setRun(null); }
+        } else setRun(null);
+      }
+    } catch (exc) {
+      setHistoryError(exc instanceof Error ? exc.message : String(exc));
+      try { setProject(await getProject(project.id)); } catch { /* keep the current project if refresh fails */ }
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return <div className="stack training-page-shell">
     <TrainingPage />
     {run && project && <RunSampleGallery projectId={project.id} runId={run.id} runStatus={run.status} />}
-    {historyError && <div className="training-error" role="alert">Unable to open historical run: {historyError}</div>}
-    {project && project.runs.length > 0 && <RunHistory runs={project.runs} selectedRunId={run?.id} openingRunId={openingRunId} onReview={(runId) => void reviewRun(runId)} />}
+    {historyError && <div className="training-error" role="alert">{historyError}</div>}
+    {project && visibleRuns.length > 0 && <RunHistory
+      runs={visibleRuns}
+      selectedRunId={run?.id}
+      openingRunId={openingRunId}
+      actionSelection={actionSelection}
+      deleting={deleting}
+      stoppingRunId={stoppingRunId}
+      onReview={(runId) => void reviewRun(runId)}
+      onToggle={toggleRun}
+      onDelete={() => void deleteSelectedRuns()}
+      onStop={(runId) => void stopRun(runId)}
+    />}
   </div>;
 }
