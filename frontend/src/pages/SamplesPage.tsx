@@ -25,9 +25,23 @@ function nextSampleId(samples: SampleDefinition[]) {
   return `sample-${String(max + 1).padStart(4, "0")}`;
 }
 
+function kreaPreviewCompatibility(plan: SamplingPlan | null) {
+  if (!plan || !plan.enabled || !plan.samples.length) return { compatible: true, issues: [] as string[] };
+  const issues: string[] = [];
+  if (plan.schedule.every_n_steps > 0) issues.push("Every N steps must be 0; stock Krea training previews run at epoch boundaries.");
+  if (!plan.renderer.use_distilled) issues.push("Distilled / Turbo sampling must be enabled for Fizgig's current Krea training preview path.");
+  if (plan.renderer.flow_shift !== null) issues.push("Flow Shift must use Model default; Krea's training preview CLI does not expose a custom preview shift.");
+  const first = plan.samples[0];
+  if (plan.samples.some((sample) => sample.width !== first.width || sample.height !== first.height)) issues.push("All Krea preview prompts must share one width and height.");
+  if (plan.samples.some((sample) => Math.abs(sample.cfg_scale - first.cfg_scale) > 1e-9)) issues.push("All Krea preview prompts must share one CFG scale.");
+  const expected = plan.samples.map((_, index) => first.seed + index);
+  if (plan.samples.some((sample, index) => sample.seed !== expected[index])) issues.push(`Fizgig renders prompt i with base seed + i; this set should use seeds ${expected[0]} through ${expected[expected.length - 1]}.`);
+  return { compatible: issues.length === 0, issues };
+}
+
 export function SamplesPage() {
   const navigate = useNavigate();
-  const { project, triggerWord } = useSession();
+  const { project, revision, modelFamily, triggerWord } = useSession();
   const [plan, setPlan] = useState<SamplingPlan | null>(null);
   const [savedPlan, setSavedPlan] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,6 +68,8 @@ export function SamplesPage() {
   const dirty = Boolean(plan && JSON.stringify(plan) !== savedPlan);
   const resolvedTrigger = project?.trigger_word?.trim() || triggerWord.trim();
   const sampleCount = plan?.samples.length ?? 0;
+  const activeModelFamily = revision?.model_family && revision.model_family !== "generic" ? revision.model_family : modelFamily;
+  const compatibility = useMemo(() => activeModelFamily === "krea2" ? kreaPreviewCompatibility(plan) : { compatible: true, issues: [] as string[] }, [activeModelFamily, plan]);
 
   async function persist(next: SamplingPlan, success: string) {
     if (!project) return;
@@ -148,25 +164,54 @@ export function SamplesPage() {
     await persist(plan, "Sampling settings saved to the project.");
   }
 
+  async function alignForStockKrea() {
+    if (!plan || !plan.samples.length) return;
+    const first = plan.samples[0];
+    const next: SamplingPlan = {
+      ...plan,
+      authoring: { seed_mode: "increment", seed_value: first.seed + plan.samples.length },
+      schedule: { ...plan.schedule, every_n_steps: 0 },
+      renderer: { ...plan.renderer, use_distilled: true, flow_shift: null },
+      samples: plan.samples.map((sample, index) => ({
+        ...sample,
+        width: first.width,
+        height: first.height,
+        cfg_scale: first.cfg_scale,
+        seed: first.seed + index,
+      })),
+    };
+    await persist(next, "Sampling set aligned to Fizgig's stock Krea in-training preview options.");
+  }
+
   const sampleRows = useMemo(() => plan?.samples ?? [], [plan]);
 
   if (!project) return <section className="panel hero-panel stack"><p className="eyebrow">Project required</p><h1>Sampling</h1><p className="muted">Open a project before configuring training samples.</p></section>;
   if (loading || !plan) return <section className="panel"><p className="muted">Loading sampling plan…</p>{message && <div className="notice error">{message}</div>}</section>;
 
   return <div className="stack sampling-page">
-    <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build a stable set of prompts, dimensions, guidance values and seeds to compare progress throughout training.</p></div></header>
+    <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build a stable set of prompts, dimensions, guidance values and seeds to compare progress throughout training. Krea runs now pass compatible probes directly into Fizgig's native training preview renderer.</p></div></header>
 
     <section className="panel stack sampling-base-panel">
       <div className="sample-section-heading sampling-base-heading">
-        <div><p className="eyebrow">Base cadence</p><div className="card-title">When the sampling system runs</div><p className="muted">This cadence is the common baseline for the sample set. Future per-sample downsampling can multiply this cadence for lower-frequency diagnostic probes.</p></div>
+        <div><p className="eyebrow">Base cadence</p><div className="card-title">When the sampling system runs</div><p className="muted">This cadence is the common baseline for the sample set. Generated preview images are preserved inside the training run for later review.</p></div>
         <label className="sampling-enable-control inline-check"><input type="checkbox" checked={plan.enabled} onChange={(event) => patchPlan({ enabled: event.target.checked })} /> Enable sampling</label>
       </div>
       <fieldset className={`sampling-base-controls ${plan.enabled ? "" : "disabled"}`} disabled={!plan.enabled}>
         <label className="inline-check"><input type="checkbox" checked={plan.schedule.sample_at_start} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, sample_at_start: event.target.checked } })} /> Sample at start</label>
         <label>Every N epochs<input type="number" min={0} value={plan.schedule.every_n_epochs} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_epochs: Number(event.target.value) } })} /><span className="muted">0 disables epoch cadence.</span></label>
-        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence.</span></label>
+        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence. Stock Krea currently requires 0 here.</span></label>
       </fieldset>
     </section>
+
+    {activeModelFamily === "krea2" && plan.enabled && plan.samples.length > 0 && <section className="panel stack sample-krea-compatibility">
+      <div className="sample-section-heading">
+        <div><p className="eyebrow">Fizgig compatibility</p><div className="card-title">Krea in-training previews</div><p className="muted">We use only preview behavior exposed by the pinned Fizgig standalone trainer rather than inventing a separate web sampler.</p></div>
+        {!compatibility.compatible && <button className="secondary" onClick={() => void alignForStockKrea()} disabled={saving}>Align to Fizgig Krea</button>}
+      </div>
+      {compatibility.compatible
+        ? <div className="notice success">Sampling set maps directly to Fizgig's Krea preview CLI: shared size / CFG and base-seed + prompt-index behavior.</div>
+        : <div className="notice warning"><strong>Alignment needed before this plan can render during Krea training.</strong><ul>{compatibility.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+    </section>}
 
     <section className="panel stack sample-editor-panel">
       <div className="sample-section-heading"><div><p className="eyebrow">{editId ? "Edit sample" : "New sample"}</p><div className="card-title">{editId ?? "Compose an evaluation sample"}</div></div>{editId && <button className="secondary" onClick={() => resetEditor()}>Cancel edit</button>}</div>
@@ -182,7 +227,7 @@ export function SamplesPage() {
       <div className="sample-definition-grid">
         <label>Width<input type="number" min={128} max={4096} step={8} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
         <label>Height<input type="number" min={128} max={4096} step={8} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
-        <label>CFG Scale<input type="number" min={0} max={30} step={0.1} value={cfgScale} onChange={(event) => setCfgScale(Number(event.target.value))} /><span className="muted">Stored per sample even when the distilled sampler does not use CFG.</span></label>
+        <label>CFG Scale<input type="number" min={0} max={30} step={0.1} value={cfgScale} onChange={(event) => setCfgScale(Number(event.target.value))} /><span className="muted">Stock Krea applies one shared CFG value across the prompt set.</span></label>
         {editId ? <label>Seed<input type="number" min={0} max={4294967295} value={editSeed} onChange={(event) => setEditSeed(Number(event.target.value))} /><span className="muted">Concrete seed stored with this sample.</span></label> : <div className="sample-seed-field">
           <span className="sample-field-label">Seed assignment</span>
           <div className="sample-seed-box">
@@ -209,11 +254,11 @@ export function SamplesPage() {
         </div>
         <div className="sample-list-actions"><button className="secondary" onClick={() => beginEdit(sample)}>Edit</button><button className="secondary" onClick={() => void duplicateSample(sample)}>Duplicate</button><button className="danger" onClick={() => void deleteSample(sample)}>Delete</button></div>
       </article>)}</div> : <div className="sample-empty-state">No evaluation samples yet. Compose one above or start from the Prompt Library.</div>}
-      <p className="muted sample-trigger-note">Sample templates retain <code>__trigger__</code>. The list resolves that token against the current project trigger; run preparation will later snapshot both the trigger and fully resolved prompt.</p>
+      <p className="muted sample-trigger-note">Sample templates retain <code>__trigger__</code>. At run start the harness freezes this project plan, resolves the trigger, records the Turbo model SHA-256 and passes the compatible options into Fizgig.</p>
     </section>
 
     <section className="panel stack">
-      <div><p className="eyebrow">Sampling engine</p><div className="card-title">Shared renderer settings</div><p className="muted">Prompt, dimensions, CFG and concrete seed stay per sample. These controls describe how the entire set is rendered.</p></div>
+      <div><p className="eyebrow">Sampling engine</p><div className="card-title">Shared renderer settings</div><p className="muted">These controls describe how the entire sample set is rendered.</p></div>
       <div className="sample-settings-grid">
         <label className="inline-check"><input type="checkbox" checked={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, use_distilled: event.target.checked } })} /> Use distilled / turbo model for samples</label>
         <label>Cache sample model<select value={plan.renderer.cache_model} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, cache_model: event.target.value as SamplingPlan["renderer"]["cache_model"] } })}><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
@@ -221,7 +266,7 @@ export function SamplesPage() {
         <label><span className="sample-field-label-inline">Flow Shift <small>Optional</small></span><input type="number" min={0} step={0.1} value={plan.renderer.flow_shift ?? ""} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
       </div>
       <label>Negative prompt<textarea value={plan.renderer.negative_prompt} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, negative_prompt: event.target.value } })} /></label>
-      <div className="sample-distilled-note">{plan.renderer.use_distilled ? "Distilled sampling selected. Per-sample CFG values remain stored so the same probes can be reused unchanged with an undistilled renderer." : "Undistilled sampling selected. Each sample's CFG Scale will be applied."}</div>
+      <div className="sample-distilled-note">{plan.renderer.use_distilled ? "Distilled sampling selected. Krea uses the pinned Fizgig Turbo preview path and writes images into the run for epoch-by-epoch review." : "Undistilled sampling remains part of the project schema, but the current Krea training preview path requires distilled / Turbo mode."}</div>
       <div className="actions"><button className="secondary" onClick={() => void saveSettings()} disabled={saving || !dirty}>{saving ? "Saving…" : "Save Sampling Settings"}</button></div>
     </section>
 
