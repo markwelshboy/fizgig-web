@@ -100,7 +100,7 @@ function RunSampleGallery({ projectId, runId, runStatus }: { projectId: string; 
 function RunHistory({ runs, selectedRunId, openingRunId, onReview }: { runs: ProjectRunSummary[]; selectedRunId?: string; openingRunId: string | null; onReview: (runId: string) => void }) {
   return <section className="panel stack training-run-browser-panel">
     <div className="training-section-heading">
-      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples.</p></div>
+      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Its saved configuration also becomes the editable template for the next prepared run.</p></div>
       <span className="training-samples-count">{runs.length} run{runs.length === 1 ? "" : "s"}</span>
     </div>
     <div className="training-run-browser-list">
@@ -120,6 +120,17 @@ export function TrainingPageShell() {
   const { project, run, setRun } = useSession();
   const [openingRunId, setOpeningRunId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState("");
+
+  useEffect(() => {
+    if (!project?.current_run || run) return;
+    let cancelled = false;
+    setOpeningRunId(project.current_run);
+    getRun(project.id, project.current_run)
+      .then((selected) => { if (!cancelled) setRun(selected); })
+      .catch((exc) => { if (!cancelled) setHistoryError(exc instanceof Error ? exc.message : String(exc)); })
+      .finally(() => { if (!cancelled) setOpeningRunId(null); });
+    return () => { cancelled = true; };
+  }, [project?.id, project?.current_run, run?.id, setRun]);
 
   async function reviewRun(runId: string) {
     if (!project) return;
