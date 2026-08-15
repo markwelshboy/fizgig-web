@@ -1,0 +1,61 @@
+.training-page-shell { width: 100%; max-width: none; }
+.training-page-shell > .training-harness-page { margin-bottom: 0; }
+/* The legacy TrainingPage history was informational only. The shell replaces it with the actionable browser below. */
+.training-page-shell .training-harness-page .training-history-panel { display: none; }
+
+.training-run-browser-panel,
+.training-samples-panel { width: 100%; }
+
+.training-run-browser-list { display: grid; gap: 8px; }
+.training-run-browser-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  text-align: left;
+  border: 1px solid #26354c;
+  border-radius: 11px;
+  background: #091423;
+  color: #cbd5e1;
+  padding: 11px 13px;
+  cursor: pointer;
+}
+.training-run-browser-row:hover { border-color: rgba(139,92,246,.6); background: #0c1728; }
+.training-run-browser-row.selected { border-color: rgba(139,92,246,.75); box-shadow: inset 0 0 0 1px rgba(139,92,246,.15); background: rgba(91,33,182,.12); }
+.training-run-browser-row:disabled { cursor: progress; opacity: .72; }
+.training-run-browser-identity { display: grid; grid-template-columns: auto minmax(0,1fr); column-gap: 8px; row-gap: 3px; min-width: 0; }
+.training-run-browser-identity strong { color: #ddd6fe; font-size: 11px; }
+.training-run-browser-identity > span { color: #d6deec; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.training-run-browser-identity small { grid-column: 1 / -1; color: #718198; font-size: 9px; }
+.training-run-browser-status { flex: 0 0 auto; display: grid; grid-template-columns: auto auto auto; align-items: center; gap: 8px; color: #8998ad; font-size: 10px; }
+.training-run-browser-status > span { text-transform: uppercase; letter-spacing: .05em; }
+.training-run-browser-status small { color: #718198; }
+.training-run-browser-status b { min-width: 56px; text-align: center; border: 1px solid #334155; border-radius: 999px; padding: 4px 7px; color: #c4b5fd; background: #0b1422; font-size: 9px; font-weight: 700; }
+.training-run-browser-row.selected .training-run-browser-status b { color: #86efac; border-color: rgba(34,197,94,.4); background: rgba(22,101,52,.12); }
+
+.training-samples-heading { align-items: flex-start; }
+.training-samples-heading .muted { margin: 4px 0 0; max-width: 760px; }
+.training-samples-controls { display: flex; align-items: flex-end; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+.training-samples-controls label { display: grid; gap: 4px; color: #7f8da3; font-size: 9px; }
+.training-samples-controls select { min-width: 150px; }
+.training-samples-count { border: 1px solid #334155; border-radius: 999px; padding: 5px 8px; background: #0b1422; color: #9aa8ba; font-size: 9px; white-space: nowrap; }
+.training-sample-empty { min-height: 90px; display: grid; place-items: center; align-content: center; gap: 6px; border: 1px dashed #2c3c53; border-radius: 11px; background: #081321; color: #718198; text-align: center; padding: 20px; }
+.training-sample-empty strong { color: #b7c2d2; font-size: 11px; }
+.training-sample-empty span { max-width: 760px; font-size: 10px; line-height: 1.45; }
+.training-sample-empty code { color: #c4b5fd; }
+.training-samples-grid { display: grid; grid-template-columns: repeat(auto-fill,minmax(180px,1fr)); gap: 11px; }
+.training-sample-card { display: grid; gap: 8px; min-width: 0; border: 1px solid #26354c; border-radius: 11px; background: #081321; padding: 8px; color: inherit; text-decoration: none; overflow: hidden; }
+.training-sample-card:hover { border-color: rgba(139,92,246,.6); transform: translateY(-1px); }
+.training-sample-image-shell { display: block; width: 100%; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 8px; background: #050b13; }
+.training-sample-image-shell img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.training-sample-copy { display: grid; gap: 3px; min-width: 0; }
+.training-sample-copy strong { color: #e5e7eb; font-size: 11px; }
+.training-sample-copy small { color: #7f8da3; font-size: 9px; }
+.training-sample-copy code { color: #66758a; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 850px) {
+  .training-run-browser-row { align-items: flex-start; }
+  .training-run-browser-status { grid-template-columns: 1fr; justify-items: end; }
+  .training-samples-controls { justify-content: flex-start; }
+}
