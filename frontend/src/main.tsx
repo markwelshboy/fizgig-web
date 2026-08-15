@@ -3,6 +3,7 @@ import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import App from "./App";
 import { SessionProvider } from "./session";
+import "@tabler/icons-webfont/dist/tabler-icons.min.css";
 import "./styles.css";
 import "./data-ui.css";
 import "./prep-refinements.css";
