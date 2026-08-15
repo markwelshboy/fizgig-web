@@ -13,6 +13,7 @@ import { PreferencesPage } from "./pages/PreferencesPage";
 import { SamplesPage } from "./pages/SamplesPage";
 import { StartPage } from "./pages/StartPage";
 import { TrainingPageShell } from "./pages/TrainingPageShell";
+import { ProjectTransferDialog } from "./ProjectTransferDialog";
 import { useSession } from "./session";
 import { getTrainingModelState, type TrainingModelState } from "./training-models-api";
 
@@ -34,6 +35,7 @@ export default function App() {
   const [localActivity, setLocalActivity] = useState<ActivityStatus>(IDLE);
   const [notification, setNotification] = useState<RuntimeNotification | null>(null);
   const [trainingModels, setTrainingModels] = useState<TrainingModelState | null>(null);
+  const [transferMode, setTransferMode] = useState<"export" | "import" | null>(null);
   const activity = localActivity.busy ? localActivity : backendActivity;
   const activeModelFamily = revision?.model_family && revision.model_family !== "generic" ? revision.model_family : modelFamily;
   const activeTrainingFamily = trainingModels?.families.find((family) => family.id === activeModelFamily);
@@ -88,7 +90,9 @@ export default function App() {
         <div className="brand"><div className="brand-mark">✦</div><div><strong>Fizgig</strong><span>LoRA Training Studio</span></div></div>
         <nav>{nav.map(([icon, label, to]) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><i className={`ti ${icon} step`} aria-hidden="true" />{label}</NavLink>)}</nav>
         <div className="sidebar-spacer" />
-        {project && <a className="nav-item export-project-button" href={`/api/projects/${encodeURIComponent(project.id)}/export`} title="Download the complete portable Fizgig project archive"><i className="ti ti-package-export nav-action-icon" aria-hidden="true" />Export Project</a>}
+        {project
+          ? <button className="nav-item transfer-button export-project-button" type="button" onClick={() => setTransferMode("export")} title="Choose what to include in the Fizgig project archive"><i className="ti ti-package-export nav-action-icon" aria-hidden="true" />Export Project</button>
+          : <button className="nav-item transfer-button" type="button" onClick={() => setTransferMode("import")} title="Inspect and selectively import a Fizgig project archive"><i className="ti ti-package-import nav-action-icon" aria-hidden="true" />Import Project</button>}
         {project && <button className="nav-item close-project-button" onClick={onCloseProject}><i className="ti ti-square-rounded-x nav-action-icon" aria-hidden="true" />Close Project</button>}
         <NavLink to="/preferences" className={({ isActive }) => isActive ? "nav-item active" : "nav-item"}><i className="ti ti-settings nav-action-icon" aria-hidden="true" />Preferences</NavLink>
         <div className={`status runtime-status ${activity.busy ? "busy" : "idle"}`} title={activity.detail || activity.label}>
@@ -105,6 +109,12 @@ export default function App() {
         <Routes><Route path="/" element={<StartPage />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPageShell />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
       </main>
       {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
+      {transferMode && <ProjectTransferDialog
+        mode={transferMode}
+        project={project}
+        onClose={() => setTransferMode(null)}
+        onImported={() => { window.location.href = "/"; }}
+      />}
     </div>
   );
 }
