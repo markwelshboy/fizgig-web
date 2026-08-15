@@ -55,6 +55,10 @@ function renderRunPattern(pattern: string, values: Record<string, string>) {
   return rendered.replace(/--+/g, "-").replace(/^-|-$/g, "");
 }
 
+function stringSetting(value: unknown, fallback: string) {
+  return value === undefined || value === null ? fallback : String(value);
+}
+
 export function TrainingPage() {
   const navigate = useNavigate();
   const {
@@ -98,10 +102,10 @@ export function TrainingPage() {
   const [precision, setPrecision] = useState<PrecisionMode>("fp8");
   const [compileMode, setCompileMode] = useState<CompileMode>("auto");
   const [cachePreparation, setCachePreparation] = useState(true);
-  const [detectProblems] = useState(true);
-  const [perImageLr] = useState(false);
-  const [warmupLookOutliers] = useState(false);
-  const [autoRecaption] = useState(false);
+  const [detectProblems, setDetectProblems] = useState(true);
+  const [perImageLr, setPerImageLr] = useState(false);
+  const [warmupLookOutliers, setWarmupLookOutliers] = useState(false);
+  const [autoRecaption, setAutoRecaption] = useState(false);
   const [wandbPatternChoice, setWandbPatternChoice] = useState(PREFERENCES_PATTERN);
 
   const activeModelFamily = revision?.model_family && revision.model_family !== "generic"
@@ -146,6 +150,49 @@ export function TrainingPage() {
     });
   }, [setProject, setRun]);
 
+  // A reviewed/current run is also the template for the next run. This prevents a project reload
+  // from silently snapping non-default values (for example save_every_n_epochs=2) back to the
+  // browser's defaults. Preparing still creates a new immutable run; these are just editable inputs.
+  useEffect(() => {
+    if (!run) return;
+    const config = run.config ?? {};
+    const network = (config.network ?? {}) as Record<string, unknown>;
+    const training = (config.training ?? {}) as Record<string, unknown>;
+    const optimizerConfig = (config.optimizer ?? {}) as Record<string, unknown>;
+    const learning = (config.learning_rate ?? {}) as Record<string, unknown>;
+    const datasetConfig = (config.dataset ?? {}) as Record<string, unknown>;
+    const runtimeConfig = (config.runtime ?? {}) as Record<string, unknown>;
+    const tracking = (config.tracking ?? {}) as Record<string, unknown>;
+    const lossWatch = (config.loss_watch ?? {}) as Record<string, unknown>;
+
+    setRunName(run.name || "");
+    setRank(stringSetting(network.rank, "32"));
+    setAlpha(stringSetting(network.alpha, "32"));
+    setEpochs(stringSetting(training.max_epochs, "30"));
+    setSaveEvery(stringSetting(training.save_every_n_epochs, "1"));
+    setSeed(stringSetting(training.seed, "42"));
+    setTargetMegapixels(stringSetting(training.target_megapixels, "1.0"));
+    setCachePreparation(training.cache_preparation !== false);
+    setKeepLast(stringSetting(training.keep_last_states, "4"));
+    setBatchSize(stringSetting(datasetConfig.batch_size, "1"));
+    setGradientAccumulation(stringSetting(optimizerConfig.gradient_accumulation, "1"));
+    setMaxGradNorm(stringSetting(optimizerConfig.max_grad_norm, "1.0"));
+    setOptimizer(stringSetting(optimizerConfig.type, "adamw"));
+    const mode = String(learning.mode ?? "adaptive");
+    setAdaptiveLr(mode === "adaptive");
+    setLearningRate(stringSetting(learning.lr, "0.0001"));
+    setMinLr(stringSetting(learning.min_lr, "0.0001"));
+    setMaxLr(stringSetting(learning.max_lr, "0.0004"));
+    setPrecision((["fp8", "bf16", "nf4"].includes(String(runtimeConfig.base_precision)) ? String(runtimeConfig.base_precision) : "fp8") as PrecisionMode);
+    setCompileMode((["auto", "off", "on"].includes(String(runtimeConfig.compile_blocks)) ? String(runtimeConfig.compile_blocks) : "auto") as CompileMode);
+    setDetectProblems(lossWatch.detect_problem_images !== false);
+    setPerImageLr(Boolean(lossWatch.per_image_lr));
+    setWarmupLookOutliers(Boolean(lossWatch.warmup_look_outliers));
+    setAutoRecaption(Boolean(lossWatch.auto_recaption));
+    const savedPattern = String(tracking.wandb_run_name_pattern ?? "");
+    setWandbPatternChoice(savedPattern && WANDB_PATTERN_OPTIONS.some((item) => item.value === savedPattern) ? savedPattern : PREFERENCES_PATTERN);
+  }, [run?.id]);
+
   useEffect(() => {
     if (!project || !revision) {
       setPrep(null);
@@ -180,7 +227,7 @@ export function TrainingPage() {
         setMethodologies(nextMethodologies);
         setTrackingPrefs(nextPreferences as unknown as TrackingPreferences);
         setTrainingModelState(nextTrainingModels);
-        setTargetMegapixels(String(nextPrep.training_resolution?.max_megapixels ?? 1.0));
+        if (!run) setTargetMegapixels(String(nextPrep.training_resolution?.max_megapixels ?? 1.0));
       })
       .catch((exc) => {
         if (!cancelled) setError(exc instanceof Error ? exc.message : String(exc));
@@ -190,7 +237,7 @@ export function TrainingPage() {
       });
 
     return () => { cancelled = true; };
-  }, [project?.id, revision?.id, activeModelFamily]);
+  }, [project?.id, revision?.id, activeModelFamily, run?.id]);
 
   useEffect(() => {
     if (!modelFingerprinting) return;
@@ -268,6 +315,10 @@ export function TrainingPage() {
           schema_version: 1,
           source: "fizgig-web-training-harness",
           baseline_mode: "observation_only",
+          reproducibility: {
+            bucket_order: "seeded_per_epoch",
+            rng_policy: "upstream_torch_global_seed",
+          },
           network: {
             type: "lora",
             rank: numberValue(rank, 32),
@@ -409,7 +460,7 @@ export function TrainingPage() {
     <section className="panel stack training-config-panel">
       <div className="training-section-heading">
         <div><p className="eyebrow">Gate 2</p><div className="card-title">Run Configuration</div></div>
-        <span className="muted">Use the same settings for the standard Fizgig A/B run.</span>
+        <span className="muted">{run ? `Loaded from ${run.id}; preparing creates a new run from these settings.` : "Configure the next immutable training run."}</span>
       </div>
 
       <div className="training-config-grid">
