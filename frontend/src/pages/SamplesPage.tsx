@@ -25,23 +25,9 @@ function nextSampleId(samples: SampleDefinition[]) {
   return `sample-${String(max + 1).padStart(4, "0")}`;
 }
 
-function kreaPreviewCompatibility(plan: SamplingPlan | null) {
-  if (!plan || !plan.enabled || !plan.samples.length) return { compatible: true, issues: [] as string[] };
-  const issues: string[] = [];
-  if (plan.schedule.every_n_steps > 0) issues.push("Every N steps must be 0; stock Krea training previews run at epoch boundaries.");
-  if (!plan.renderer.use_distilled) issues.push("Distilled / Turbo sampling must be enabled for Fizgig's current Krea training preview path.");
-  if (plan.renderer.flow_shift !== null) issues.push("Flow Shift must use Model default; Krea's training preview CLI does not expose a custom preview shift.");
-  const first = plan.samples[0];
-  if (plan.samples.some((sample) => sample.width !== first.width || sample.height !== first.height)) issues.push("All Krea preview prompts must share one width and height.");
-  if (plan.samples.some((sample) => Math.abs(sample.cfg_scale - first.cfg_scale) > 1e-9)) issues.push("All Krea preview prompts must share one CFG scale.");
-  const expected = plan.samples.map((_, index) => first.seed + index);
-  if (plan.samples.some((sample, index) => sample.seed !== expected[index])) issues.push(`Fizgig renders prompt i with base seed + i; this set should use seeds ${expected[0]} through ${expected[expected.length - 1]}.`);
-  return { compatible: issues.length === 0, issues };
-}
-
 export function SamplesPage() {
   const navigate = useNavigate();
-  const { project, revision, modelFamily, triggerWord } = useSession();
+  const { project, triggerWord } = useSession();
   const [plan, setPlan] = useState<SamplingPlan | null>(null);
   const [savedPlan, setSavedPlan] = useState("");
   const [loading, setLoading] = useState(false);
@@ -52,7 +38,7 @@ export function SamplesPage() {
   const [prompt, setPrompt] = useState<string>(PROMPT_LIBRARY[0].template);
   const [width, setWidth] = useState(1024);
   const [height, setHeight] = useState(1024);
-  const [cfgScale, setCfgScale] = useState(4.5);
+  const [cfgScale, setCfgScale] = useState(1.0);
   const [editSeed, setEditSeed] = useState(42);
 
   useEffect(() => {
@@ -68,8 +54,6 @@ export function SamplesPage() {
   const dirty = Boolean(plan && JSON.stringify(plan) !== savedPlan);
   const resolvedTrigger = project?.trigger_word?.trim() || triggerWord.trim();
   const sampleCount = plan?.samples.length ?? 0;
-  const activeModelFamily = revision?.model_family && revision.model_family !== "generic" ? revision.model_family : modelFamily;
-  const compatibility = useMemo(() => activeModelFamily === "krea2" ? kreaPreviewCompatibility(plan) : { compatible: true, issues: [] as string[] }, [activeModelFamily, plan]);
 
   async function persist(next: SamplingPlan, success: string) {
     if (!project) return;
@@ -91,10 +75,24 @@ export function SamplesPage() {
     setPlan((current) => current ? { ...current, ...patch } : current);
   }
 
+  function setTurboSampling(enabled: boolean) {
+    setPlan((current) => {
+      if (!current) return current;
+      if (!enabled) return { ...current, renderer: { ...current.renderer, use_distilled: false } };
+      return {
+        ...current,
+        renderer: { ...current.renderer, use_distilled: true, steps: 8, flow_shift: null },
+        samples: current.samples.map((sample) => ({ ...sample, cfg_scale: 1.0 })),
+      };
+    });
+    if (enabled) setCfgScale(1.0);
+  }
+
   function resetEditor(keepShape = true) {
     setEditId(null);
     setPrompt(PROMPT_LIBRARY[libraryIndex].template);
-    if (!keepShape) { setWidth(1024); setHeight(1024); setCfgScale(4.5); }
+    if (!keepShape) { setWidth(1024); setHeight(1024); setCfgScale(plan?.renderer.use_distilled ? 1.0 : 4.5); }
+    else if (plan?.renderer.use_distilled) setCfgScale(1.0);
     setEditSeed(plan?.authoring.seed_value ?? 42);
   }
 
@@ -112,7 +110,7 @@ export function SamplesPage() {
       prompt_template: prompt.trim(),
       width: Math.max(128, Math.round(width)),
       height: Math.max(128, Math.round(height)),
-      cfg_scale: Math.max(0, Number(cfgScale)),
+      cfg_scale: plan.renderer.use_distilled ? 1.0 : Math.max(0, Number(cfgScale)),
       seed: Math.max(0, Math.round(concreteSeed)),
     };
 
@@ -131,6 +129,7 @@ export function SamplesPage() {
     await persist(next, editId ? `${definition.id} updated.` : `${definition.id} added to the sampling set.`);
     setEditId(null);
     setPrompt(PROMPT_LIBRARY[libraryIndex].template);
+    setCfgScale(plan.renderer.use_distilled ? 1.0 : cfgScale);
     setEditSeed(authoring.seed_value);
   }
 
@@ -139,15 +138,24 @@ export function SamplesPage() {
     setPrompt(sample.prompt_template);
     setWidth(sample.width);
     setHeight(sample.height);
-    setCfgScale(sample.cfg_scale);
+    setCfgScale(plan?.renderer.use_distilled ? 1.0 : sample.cfg_scale);
     setEditSeed(sample.seed);
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function duplicateSample(sample: SampleDefinition) {
     if (!plan) return;
-    const copy = { ...sample, id: nextSampleId(plan.samples) };
-    const next = { ...plan, samples: [...plan.samples, copy] };
+    const sequentialSeed = plan.samples.length ? plan.samples[0].seed + plan.samples.length : sample.seed;
+    const copy = {
+      ...sample,
+      id: nextSampleId(plan.samples),
+      cfg_scale: plan.renderer.use_distilled ? 1.0 : sample.cfg_scale,
+      seed: plan.authoring.seed_mode === "increment" ? sequentialSeed : sample.seed,
+    };
+    const authoring = plan.authoring.seed_mode === "increment"
+      ? { ...plan.authoring, seed_value: Math.min(4294967295, copy.seed + 1) }
+      : plan.authoring;
+    const next = { ...plan, samples: [...plan.samples, copy], authoring };
     await persist(next, `${copy.id} duplicated from ${sample.id}.`);
     beginEdit(copy);
   }
@@ -164,32 +172,13 @@ export function SamplesPage() {
     await persist(plan, "Sampling settings saved to the project.");
   }
 
-  async function alignForStockKrea() {
-    if (!plan || !plan.samples.length) return;
-    const first = plan.samples[0];
-    const next: SamplingPlan = {
-      ...plan,
-      authoring: { seed_mode: "increment", seed_value: first.seed + plan.samples.length },
-      schedule: { ...plan.schedule, every_n_steps: 0 },
-      renderer: { ...plan.renderer, use_distilled: true, flow_shift: null },
-      samples: plan.samples.map((sample, index) => ({
-        ...sample,
-        width: first.width,
-        height: first.height,
-        cfg_scale: first.cfg_scale,
-        seed: first.seed + index,
-      })),
-    };
-    await persist(next, "Sampling set aligned to Fizgig's stock Krea in-training preview options.");
-  }
-
   const sampleRows = useMemo(() => plan?.samples ?? [], [plan]);
 
   if (!project) return <section className="panel hero-panel stack"><p className="eyebrow">Project required</p><h1>Sampling</h1><p className="muted">Open a project before configuring training samples.</p></section>;
   if (loading || !plan) return <section className="panel"><p className="muted">Loading sampling plan…</p>{message && <div className="notice error">{message}</div>}</section>;
 
   return <div className="stack sampling-page">
-    <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build a stable set of prompts, dimensions, guidance values and seeds to compare progress throughout training. Krea runs now pass compatible probes directly into Fizgig's native training preview renderer.</p></div></header>
+    <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build a stable set of prompts, dimensions and seeds to compare progress throughout training. Krea Turbo previews use Fizgig's native 8-step CFG-free renderer.</p></div></header>
 
     <section className="panel stack sampling-base-panel">
       <div className="sample-section-heading sampling-base-heading">
@@ -199,19 +188,9 @@ export function SamplesPage() {
       <fieldset className={`sampling-base-controls ${plan.enabled ? "" : "disabled"}`} disabled={!plan.enabled}>
         <label className="inline-check"><input type="checkbox" checked={plan.schedule.sample_at_start} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, sample_at_start: event.target.checked } })} /> Sample at start</label>
         <label>Every N epochs<input type="number" min={0} value={plan.schedule.every_n_epochs} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_epochs: Number(event.target.value) } })} /><span className="muted">0 disables epoch cadence.</span></label>
-        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence. Stock Krea currently requires 0 here.</span></label>
+        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence. Current Krea in-training previews run at epoch boundaries.</span></label>
       </fieldset>
     </section>
-
-    {activeModelFamily === "krea2" && plan.enabled && plan.samples.length > 0 && <section className="panel stack sample-krea-compatibility">
-      <div className="sample-section-heading">
-        <div><p className="eyebrow">Fizgig compatibility</p><div className="card-title">Krea in-training previews</div><p className="muted">We use only preview behavior exposed by the pinned Fizgig standalone trainer rather than inventing a separate web sampler.</p></div>
-        {!compatibility.compatible && <button className="secondary" onClick={() => void alignForStockKrea()} disabled={saving}>Align to Fizgig Krea</button>}
-      </div>
-      {compatibility.compatible
-        ? <div className="notice success">Sampling set maps directly to Fizgig's Krea preview CLI: shared size / CFG and base-seed + prompt-index behavior.</div>
-        : <div className="notice warning"><strong>Alignment needed before this plan can render during Krea training.</strong><ul>{compatibility.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
-    </section>}
 
     <section className="panel stack sample-editor-panel">
       <div className="sample-section-heading"><div><p className="eyebrow">{editId ? "Edit sample" : "New sample"}</p><div className="card-title">{editId ?? "Compose an evaluation sample"}</div></div>{editId && <button className="secondary" onClick={() => resetEditor()}>Cancel edit</button>}</div>
@@ -227,7 +206,7 @@ export function SamplesPage() {
       <div className="sample-definition-grid">
         <label>Width<input type="number" min={128} max={4096} step={8} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
         <label>Height<input type="number" min={128} max={4096} step={8} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
-        <label>CFG Scale<input type="number" min={0} max={30} step={0.1} value={cfgScale} onChange={(event) => setCfgScale(Number(event.target.value))} /><span className="muted">Stock Krea applies one shared CFG value across the prompt set.</span></label>
+        <label>CFG Scale<input type="number" min={0} max={30} step={0.1} value={plan.renderer.use_distilled ? 1.0 : cfgScale} disabled={plan.renderer.use_distilled} onChange={(event) => setCfgScale(Number(event.target.value))} /><span className="muted">{plan.renderer.use_distilled ? "Turbo previews are CFG-free; Fizgig uses CFG 1.0." : "Stored per sample for an undistilled renderer."}</span></label>
         {editId ? <label>Seed<input type="number" min={0} max={4294967295} value={editSeed} onChange={(event) => setEditSeed(Number(event.target.value))} /><span className="muted">Concrete seed stored with this sample.</span></label> : <div className="sample-seed-field">
           <span className="sample-field-label">Seed assignment</span>
           <div className="sample-seed-box">
@@ -250,23 +229,23 @@ export function SamplesPage() {
         <div className="sample-list-copy">
           <div className="sample-list-id">{sample.id}</div>
           <div className="sample-list-prompt"><TriggerTemplateText text={sample.prompt_template} triggerWord={resolvedTrigger} /></div>
-          <div className="sample-list-meta"><span>{sample.width} × {sample.height}</span><span>CFG {sample.cfg_scale}</span><span>Seed {sample.seed}</span></div>
+          <div className="sample-list-meta"><span>{sample.width} × {sample.height}</span><span>CFG {plan.renderer.use_distilled ? "1.0" : sample.cfg_scale}</span><span>Seed {sample.seed}</span></div>
         </div>
         <div className="sample-list-actions"><button className="secondary" onClick={() => beginEdit(sample)}>Edit</button><button className="secondary" onClick={() => void duplicateSample(sample)}>Duplicate</button><button className="danger" onClick={() => void deleteSample(sample)}>Delete</button></div>
       </article>)}</div> : <div className="sample-empty-state">No evaluation samples yet. Compose one above or start from the Prompt Library.</div>}
-      <p className="muted sample-trigger-note">Sample templates retain <code>__trigger__</code>. At run start the harness freezes this project plan, resolves the trigger, records the Turbo model SHA-256 and passes the compatible options into Fizgig.</p>
+      <p className="muted sample-trigger-note">Sample templates retain <code>__trigger__</code>. At run preparation the harness freezes this project plan; Krea currently expects one shared preview size and sequential base-seed + prompt-index seeds.</p>
     </section>
 
     <section className="panel stack">
       <div><p className="eyebrow">Sampling engine</p><div className="card-title">Shared renderer settings</div><p className="muted">These controls describe how the entire sample set is rendered.</p></div>
       <div className="sample-settings-grid">
-        <label className="inline-check"><input type="checkbox" checked={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, use_distilled: event.target.checked } })} /> Use distilled / turbo model for samples</label>
+        <label className="inline-check"><input type="checkbox" checked={plan.renderer.use_distilled} onChange={(event) => setTurboSampling(event.target.checked)} /> Use distilled / turbo model for samples</label>
         <label>Cache sample model<select value={plan.renderer.cache_model} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, cache_model: event.target.value as SamplingPlan["renderer"]["cache_model"] } })}><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
-        <label>Steps<input type="number" min={1} max={500} value={plan.renderer.steps} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, steps: Number(event.target.value) } })} /></label>
-        <label><span className="sample-field-label-inline">Flow Shift <small>Optional</small></span><input type="number" min={0} step={0.1} value={plan.renderer.flow_shift ?? ""} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
+        <label>Steps<input type="number" min={1} max={500} value={plan.renderer.use_distilled ? 8 : plan.renderer.steps} disabled={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, steps: Number(event.target.value) } })} /><span className="muted">{plan.renderer.use_distilled ? "Turbo is fixed at 8 denoising steps." : "Renderer denoising steps."}</span></label>
+        <label><span className="sample-field-label-inline">Flow Shift <small>Optional</small></span><input type="number" min={0} step={0.1} value={plan.renderer.use_distilled ? "" : plan.renderer.flow_shift ?? ""} disabled={plan.renderer.use_distilled} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
       </div>
-      <label>Negative prompt<textarea value={plan.renderer.negative_prompt} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, negative_prompt: event.target.value } })} /></label>
-      <div className="sample-distilled-note">{plan.renderer.use_distilled ? "Distilled sampling selected. Krea uses the pinned Fizgig Turbo preview path and writes images into the run for epoch-by-epoch review." : "Undistilled sampling remains part of the project schema, but the current Krea training preview path requires distilled / Turbo mode."}</div>
+      <label>Negative prompt<textarea value={plan.renderer.negative_prompt} disabled={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, negative_prompt: event.target.value } })} /><span className="muted">{plan.renderer.use_distilled ? "Unused in the Turbo CFG-free path." : "Used when the renderer enables CFG."}</span></label>
+      <div className="sample-distilled-note">{plan.renderer.use_distilled ? "Krea Turbo preview contract: RAW training DiT + Turbo preview path, 8 steps, CFG 1.0 / CFG-free. Generic 40-step and CFG 4.5 values are not passed into training." : "Undistilled sampling remains part of the project schema, but the current Krea in-training preview path uses Turbo mode."}</div>
       <div className="actions"><button className="secondary" onClick={() => void saveSettings()} disabled={saving || !dirty}>{saving ? "Saving…" : "Save Sampling Settings"}</button></div>
     </section>
 
