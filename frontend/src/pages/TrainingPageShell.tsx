@@ -5,8 +5,6 @@ import { TrainingPage } from "./TrainingPage";
 
 const ACTIVE_RUN_STATES = new Set(["starting", "cache_latents", "cache_text", "training"]);
 
-type SampleEpochChoice = "latest" | number;
-
 function modelLabel(value: string) {
   if (value === "krea2") return "Krea 2";
   if (value === "klein") return "Klein";
@@ -20,7 +18,7 @@ function sampleLabel(sample: TrainingSample) {
 
 function RunSampleGallery({ projectId, runId, runStatus }: { projectId: string; runId: string; runStatus: string }) {
   const [samples, setSamples] = useState<TrainingSample[]>([]);
-  const [choice, setChoice] = useState<SampleEpochChoice>("latest");
+  const [viewing, setViewing] = useState<TrainingSample | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -41,7 +39,7 @@ function RunSampleGallery({ projectId, runId, runStatus }: { projectId: string; 
     }
 
     setSamples([]);
-    setChoice("latest");
+    setViewing(null);
     setLoading(true);
     void refresh();
     if (!ACTIVE_RUN_STATES.has(runStatus)) return () => { cancelled = true; };
@@ -52,47 +50,69 @@ function RunSampleGallery({ projectId, runId, runStatus }: { projectId: string; 
     };
   }, [projectId, runId, runStatus]);
 
-  const epochs = useMemo(() => [...new Set(samples.flatMap((sample) => sample.epoch === null ? [] : [sample.epoch]))].sort((a, b) => a - b), [samples]);
-  const latestEpoch = epochs.length ? epochs[epochs.length - 1] : null;
-  const viewedEpoch = choice === "latest" ? latestEpoch : choice;
-  const visibleSamples = useMemo(() => {
-    if (viewedEpoch === null) return samples;
-    return samples.filter((sample) => sample.epoch === viewedEpoch);
-  }, [samples, viewedEpoch]);
+  const epochGroups = useMemo(() => {
+    const groups = new Map<number | null, TrainingSample[]>();
+    for (const sample of samples) {
+      if (!groups.has(sample.epoch)) groups.set(sample.epoch, []);
+      groups.get(sample.epoch)!.push(sample);
+    }
+    return [...groups.entries()]
+      .sort(([a], [b]) => {
+        if (a === null) return 1;
+        if (b === null) return -1;
+        return a - b;
+      })
+      .map(([epoch, rows]) => ({
+        epoch,
+        samples: rows.sort((a, b) => (a.sample_index ?? 9999) - (b.sample_index ?? 9999)),
+      }));
+  }, [samples]);
 
   return <section className="panel stack training-samples-panel">
     <div className="training-section-heading training-samples-heading">
       <div>
         <p className="eyebrow">Visual evaluation</p>
         <div className="card-title">Generated Training Samples</div>
-        <p className="muted">Preview images written by Fizgig are preserved with the run and grouped by training epoch.</p>
+        <p className="muted">Each epoch starts a new visual row. Rows wrap only when the previews would otherwise become too small, and alternating bands make epoch boundaries obvious.</p>
       </div>
-      <div className="training-samples-controls">
-        <span className="training-samples-count">{samples.length} image{samples.length === 1 ? "" : "s"}</span>
-        {epochs.length > 0 && <label>View
-          <select value={String(choice)} onChange={(event) => setChoice(event.target.value === "latest" ? "latest" : Number(event.target.value))}>
-            <option value="latest">Latest · epoch {latestEpoch}</option>
-            {epochs.map((epoch) => <option key={epoch} value={epoch}>Epoch {epoch}</option>)}
-          </select>
-        </label>}
-      </div>
+      <span className="training-samples-count">{samples.length} image{samples.length === 1 ? "" : "s"}</span>
     </div>
 
     {error && <div className="notice error">Unable to load generated samples: {error}</div>}
     {!error && loading && !samples.length && <div className="training-sample-empty">Checking the run for generated preview images…</div>}
     {!error && !loading && !samples.length && <div className="training-sample-empty">
       <strong>No generated preview images were recorded for this run.</strong>
-      <span>Fizgig preview output is discovered from the run's <code>sample/</code> or <code>samples/</code> directory. Empty means there are no rendered images to display, not that the project sample definitions were lost.</span>
+      <span>New Krea runs can now use Fizgig's native in-training preview generator when the project Sampling plan is enabled and compatible with the standalone preview options.</span>
     </div>}
-    {visibleSamples.length > 0 && <div className="training-samples-grid">
-      {visibleSamples.map((sample) => <a className="training-sample-card" href={sample.url} target="_blank" rel="noreferrer" key={`${sample.source_dir}/${sample.filename}`} title={sample.filename}>
-        <span className="training-sample-image-shell"><img src={sample.url} alt={`${sampleLabel(sample)}${sample.epoch === null ? "" : ` at epoch ${sample.epoch}`}`} /></span>
-        <span className="training-sample-copy">
-          <strong>{sampleLabel(sample)}</strong>
-          <small>{sample.epoch === null ? "Unclassified preview" : `Epoch ${sample.epoch}`}{sample.seed === null ? "" : ` · Seed ${sample.seed}`}</small>
-          <code>{sample.filename}</code>
-        </span>
-      </a>)}
+
+    {epochGroups.length > 0 && <div className="training-sample-epochs">
+      {epochGroups.map((group, groupIndex) => <div className="training-sample-epoch-row" key={group.epoch === null ? "other" : group.epoch}>
+        <div className="training-sample-epoch-label">
+          <span>{group.epoch === null ? "Other" : "Epoch"}</span>
+          <strong>{group.epoch === null ? "—" : group.epoch}</strong>
+          <small>{group.samples.length} preview{group.samples.length === 1 ? "" : "s"}</small>
+        </div>
+        <div className="training-sample-epoch-images" aria-label={group.epoch === null ? "Unclassified training samples" : `Epoch ${group.epoch} training samples`}>
+          {group.samples.map((sample) => <button className="training-sample-card" type="button" onClick={() => setViewing(sample)} key={`${sample.source_dir}/${sample.filename}`} title={`View ${sample.filename}`}>
+            <span className="training-sample-image-shell"><img src={sample.url} alt={`${sampleLabel(sample)}${sample.epoch === null ? "" : ` at epoch ${sample.epoch}`}`} loading={groupIndex > 3 ? "lazy" : "eager"} /></span>
+            <span className="training-sample-copy">
+              <strong>{sampleLabel(sample)}</strong>
+              <small>{sample.seed === null ? "" : `Seed ${sample.seed}`}</small>
+            </span>
+          </button>)}
+        </div>
+      </div>)}
+    </div>}
+
+    {viewing && <div className="training-sample-viewer-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setViewing(null); }}>
+      <div className="training-sample-viewer" role="dialog" aria-modal="true" aria-label={`Training sample ${viewing.filename}`}>
+        <div className="training-sample-viewer-header">
+          <div><strong>{sampleLabel(viewing)}</strong><span>{viewing.epoch === null ? "Unclassified preview" : `Epoch ${viewing.epoch}`}{viewing.seed === null ? "" : ` · Seed ${viewing.seed}`}</span></div>
+          <button type="button" onClick={() => setViewing(null)} aria-label="Close sample viewer"><i className="ti ti-x" /></button>
+        </div>
+        <div className="training-sample-viewer-image"><img src={viewing.url} alt={viewing.filename} /></div>
+        <code>{viewing.filename}</code>
+      </div>
     </div>}
   </section>;
 }
