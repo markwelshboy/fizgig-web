@@ -89,20 +89,25 @@ def _path(project_id: str) -> Path:
 def _normalize_sampling_plan(value: dict) -> dict:
     """Apply the actual stock Krea Turbo preview contract.
 
-    Fizgig's Turbo preview path is the 8-step CFG-free path. Older web plans may
-    still contain generic 40-step / CFG 4.5 values from before the native Krea
-    preview wiring existed. Do not carry those stale generic values into a run.
-    Preserve the negative prompt so it is still available if a future undistilled
-    renderer uses it, but it is intentionally unused while Turbo/CFG-free is on.
+    Fizgig's Turbo preview path is 8-step and CFG-free. It also consumes one base
+    sample seed and renders prompt i with base_seed+i. Older web plans may still
+    contain generic 40-step / CFG 4.5 values or repeated per-prompt seeds from
+    before native preview wiring existed; normalize those representation details
+    rather than asking the user to run a separate "align" operation.
     """
     normalized = json.loads(json.dumps(value))
     renderer = normalized.setdefault("renderer", {})
     if renderer.get("use_distilled", True):
         renderer["steps"] = 8
         renderer["flow_shift"] = None
-        for sample in normalized.get("samples", []):
-            if isinstance(sample, dict):
-                sample["cfg_scale"] = 1.0
+        samples = [sample for sample in normalized.get("samples", []) if isinstance(sample, dict)]
+        base_seed = int(samples[0].get("seed", 42) or 42) if samples else int(normalized.get("authoring", {}).get("seed_value", 42) or 42)
+        for index, sample in enumerate(samples):
+            sample["cfg_scale"] = 1.0
+            sample["seed"] = min(4294967295, base_seed + index)
+        authoring = normalized.setdefault("authoring", {})
+        authoring["seed_mode"] = "increment"
+        authoring["seed_value"] = min(4294967295, base_seed + len(samples))
     return normalized
 
 
