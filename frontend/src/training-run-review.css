@@ -6,24 +6,41 @@
 .training-run-browser-panel,
 .training-samples-panel { width: 100%; }
 
+.training-run-browser-heading { align-items: flex-start; }
+.training-run-browser-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 9px; flex-wrap: wrap; }
+.training-run-selection-actions { display: flex; align-items: center; gap: 7px; }
+.training-run-selection-actions button { min-height: 30px; }
+
 .training-run-browser-list { display: grid; gap: 8px; }
 .training-run-browser-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto;
+  align-items: stretch;
+  border: 1px solid #26354c;
+  border-radius: 11px;
+  background: #091423;
+  color: #cbd5e1;
+  overflow: hidden;
+}
+.training-run-browser-row:hover { border-color: rgba(139,92,246,.6); background: #0c1728; }
+.training-run-browser-row.selected { border-color: rgba(139,92,246,.75); box-shadow: inset 0 0 0 1px rgba(139,92,246,.15); background: rgba(91,33,182,.12); }
+.training-run-browser-row.action-selected { box-shadow: inset 0 0 0 1px rgba(167,139,250,.28); }
+.training-run-browser-review {
+  min-width: 0;
   width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 18px;
   text-align: left;
-  border: 1px solid #26354c;
-  border-radius: 11px;
-  background: #091423;
-  color: #cbd5e1;
+  border: 0;
+  background: transparent;
+  color: inherit;
   padding: 11px 13px;
   cursor: pointer;
 }
-.training-run-browser-row:hover { border-color: rgba(139,92,246,.6); background: #0c1728; }
-.training-run-browser-row.selected { border-color: rgba(139,92,246,.75); box-shadow: inset 0 0 0 1px rgba(139,92,246,.15); background: rgba(91,33,182,.12); }
-.training-run-browser-row:disabled { cursor: progress; opacity: .72; }
+.training-run-browser-review:disabled { cursor: progress; opacity: .72; }
 .training-run-browser-identity { display: grid; grid-template-columns: auto minmax(0,1fr); column-gap: 8px; row-gap: 3px; min-width: 0; }
 .training-run-browser-identity strong { color: #ddd6fe; font-size: 11px; }
 .training-run-browser-identity > span { color: #d6deec; font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -33,6 +50,16 @@
 .training-run-browser-status small { color: #718198; }
 .training-run-browser-status b { min-width: 56px; text-align: center; border: 1px solid #334155; border-radius: 999px; padding: 4px 7px; color: #c4b5fd; background: #0b1422; font-size: 9px; font-weight: 700; }
 .training-run-browser-row.selected .training-run-browser-status b { color: #86efac; border-color: rgba(34,197,94,.4); background: rgba(22,101,52,.12); }
+.training-run-browser-row-actions { min-width: 48px; display: flex; align-items: stretch; border-left: 1px solid rgba(51,65,85,.7); }
+.training-run-stop { align-self: center; margin: 0 7px; padding: 5px 9px; border: 1px solid rgba(248,113,113,.42); border-radius: 999px; background: rgba(127,29,29,.16); color: #fca5a5; font-size: 9px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.training-run-stop:hover:not(:disabled) { border-color: rgba(248,113,113,.72); background: rgba(127,29,29,.28); }
+.training-run-stop:disabled { opacity: .6; cursor: progress; }
+.training-run-select { position: relative; width: 44px; min-height: 42px; display: grid; place-items: center; cursor: pointer; border-left: 1px solid rgba(51,65,85,.55); }
+.training-run-select input { width: 15px; height: 15px; margin: 0; accent-color: #8b5cf6; cursor: pointer; }
+.training-run-select:hover:not(.disabled) { background: rgba(124,58,237,.1); }
+.training-run-select.disabled { opacity: .38; cursor: not-allowed; }
+.training-run-select.disabled input { cursor: not-allowed; }
+.training-run-select .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
 .training-samples-heading { align-items: flex-start; }
 .training-samples-heading .muted { margin: 4px 0 0; max-width: 780px; }
@@ -52,7 +79,7 @@
 .training-sample-epoch-label strong { font-size: 22px; line-height: 1; color: #ddd6fe; font-variant-numeric: tabular-nums; }
 .training-sample-epoch-label small { font-size: 8px; color: #708198; }
 .training-sample-epoch-images { display: flex; flex-wrap: wrap; align-content: flex-start; justify-content: flex-start; gap: 10px; min-width: 0; }
-.training-sample-card { flex: 0 1 184px; min-width: 154px; max-width: 220px; display: grid; gap: 7px; min-width: 154px; border: 1px solid #26354c; border-radius: 10px; background: #07111d; padding: 7px; color: inherit; text-decoration: none; overflow: hidden; cursor: zoom-in; text-align: left; }
+.training-sample-card { flex: 0 1 184px; min-width: 154px; max-width: 220px; display: grid; gap: 7px; border: 1px solid #26354c; border-radius: 10px; background: #07111d; padding: 7px; color: inherit; text-decoration: none; overflow: hidden; cursor: zoom-in; text-align: left; }
 .training-sample-card:hover { border-color: rgba(139,92,246,.68); transform: translateY(-1px); }
 .training-sample-image-shell { display: block; width: 100%; aspect-ratio: 1 / 1; overflow: hidden; border-radius: 7px; background: #050b13; }
 .training-sample-image-shell img { width: 100%; height: 100%; object-fit: contain; display: block; }
@@ -72,13 +99,20 @@
 .training-sample-viewer > code { color: #718198; font-size: 9px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 @media (max-width: 850px) {
-  .training-run-browser-row { align-items: flex-start; }
+  .training-run-browser-review { align-items: flex-start; }
   .training-run-browser-status { grid-template-columns: 1fr; justify-items: end; }
+  .training-run-browser-header-actions { justify-content: flex-start; }
   .training-sample-epoch-row { grid-template-columns: 62px minmax(0,1fr); gap: 8px; padding: 9px; }
   .training-sample-card { flex-basis: 160px; min-width: 140px; }
 }
 
 @media (max-width: 560px) {
+  .training-run-browser-row { grid-template-columns: minmax(0,1fr) 42px; }
+  .training-run-browser-review { display: grid; gap: 8px; }
+  .training-run-browser-status { justify-items: start; grid-template-columns: auto auto auto; }
+  .training-run-browser-row-actions { flex-direction: column; }
+  .training-run-stop { margin: 6px 4px 2px; padding: 4px 5px; }
+  .training-run-select { width: 100%; border-left: 0; border-top: 1px solid rgba(51,65,85,.55); }
   .training-sample-epoch-row { grid-template-columns: 1fr; }
   .training-sample-epoch-label { flex-direction: row; align-items: baseline; gap: 6px; }
   .training-sample-epoch-label strong { font-size: 16px; }
