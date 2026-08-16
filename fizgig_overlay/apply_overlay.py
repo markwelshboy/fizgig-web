@@ -107,7 +107,52 @@ def main() -> None:
         '        self.prev_weight_norm = cur_wn\n',
     )
 
-    print(f"Applied passive fizgig-web telemetry overlay to {head}")
+    # Preview-only web extension: Fizgig standalone intentionally exposes one --sample_seed and
+    # renders prompt i with seed+i. The web project model keeps explicit per-probe seeds. Read
+    # those frozen configured_seed values from run.json only when the web telemetry environment
+    # is present, so standalone Fizgig remains byte-for-byte on its native seed+i behavior.
+    replace_once(
+        krea_trainer,
+        '    paths = []\n'
+        '    last_prompt = None\n'
+        '    # Negative prompt rides through the CFG path (untxt) — only when CFG is actually on.\n',
+        '    paths = []\n'
+        '    last_prompt = None\n'
+        '    _web_sample_seeds = None\n'
+        '    if os.environ.get("FIZGIG_TELEMETRY_DIR", "").strip():\n'
+        '        try:\n'
+        '            _run_json = os.path.join(os.path.dirname(out_dir), "run.json")\n'
+        '            with open(_run_json, encoding="utf-8") as _f:\n'
+        '                _run = json.load(_f)\n'
+        '            _defs = (((_run.get("config") or {}).get("sampling") or {}).get("samples") or [])\n'
+        '            _seeds = [int(_s.get("configured_seed", _s.get("seed"))) for _s in _defs\n'
+        '                      if isinstance(_s, dict) and _s.get("configured_seed", _s.get("seed")) is not None]\n'
+        '            if len(_seeds) == len(encoded_prompts):\n'
+        '                _web_sample_seeds = _seeds\n'
+        '        except Exception:\n'
+        '            _web_sample_seeds = None\n'
+        '    # Negative prompt rides through the CFG path (untxt) — only when CFG is actually on.\n',
+    )
+    replace_once(
+        krea_trainer,
+        '    for i, (txt, txtmask) in enumerate(encoded_prompts):\n'
+        '        with torch.no_grad():\n',
+        '    for i, (txt, txtmask) in enumerate(encoded_prompts):\n'
+        '        _web_seed = _web_sample_seeds[i] if _web_sample_seeds is not None else seed + i\n'
+        '        with torch.no_grad():\n',
+    )
+    replace_once(
+        krea_trainer,
+        '                                   steps=steps, cfg_scale=cfg_scale, mu=1.15, seed=seed + i)\n',
+        '                                   steps=steps, cfg_scale=cfg_scale, mu=1.15, seed=_web_seed)\n',
+    )
+    replace_once(
+        krea_trainer,
+        '        p = os.path.join(out_dir, f"{output_name}_e{epoch:06d}_{i:02d}_{ts}_{seed + i}.png")\n',
+        '        p = os.path.join(out_dir, f"{output_name}_e{epoch:06d}_{i:02d}_{ts}_{_web_seed}.png")\n',
+    )
+
+    print(f"Applied passive fizgig-web telemetry + preview overlay to {head}")
 
 
 if __name__ == "__main__":
