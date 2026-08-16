@@ -99,9 +99,9 @@ def _unique_filename(original: str, existing: set[str]) -> str:
 class ImagePrepFlowService:
     """Higher-level Image Prep workflow helpers.
 
-    These operations deliberately sit alongside ImagePrepStore rather than changing the original
-    import snapshot semantics. Supplemental browser imports create a new immutable import snapshot
-    and copy those first-class source assets into the current working revision.
+    Supplemental browser imports create a new immutable import snapshot and copy those first-class
+    source assets into the current working revision. Crop presets are calculated from the exact
+    prepared-source geometry that the derivative service will crop, not merely the raw file size.
     """
 
     def import_images(
@@ -118,7 +118,6 @@ class ImagePrepFlowService:
         if project_dir not in revision_path.parents or not revision_path.is_file():
             raise FileNotFoundError(f"Unknown dataset revision: {revision_id}")
 
-        # Ensure old revisions have the modern inclusion/asset-kind fields before appending.
         image_prep_store.state(project_id, revision_id)
         manifest = json.loads(revision_path.read_text(encoding="utf-8"))
         project = project_store.get_project(project_id)
@@ -206,9 +205,10 @@ class ImagePrepFlowService:
                 "path": str(import_files),
                 "source_type": "supplemental_browser_upload",
             })
+            source_count = len([asset for asset in manifest.get("assets", []) if asset.get("asset_kind") != "derived"])
             for summary in project.get("dataset_revisions", []):
                 if summary.get("id") == revision_id:
-                    summary["image_count"] = len(manifest.get("assets", []))
+                    summary["image_count"] = source_count
                     break
             project["updated_at"] = _now()
             _write_json(project_dir / "project.json", project)
@@ -257,32 +257,31 @@ class ImagePrepFlowService:
         )
         if asset is None:
             raise FileNotFoundError(f"Included source image not found: {filename}")
-        files_dir = Path(manifest["files_path"]).resolve()
-        source = (files_dir / filename).resolve()
-        if source.parent != files_dir or not source.is_file():
-            raise FileNotFoundError(f"Working image not found: {filename}")
 
         try:
             from PIL import Image
+            from .prepared_derivatives import prepared_derivative_service
         except Exception as exc:
-            raise RuntimeError("Manual crop presets require Pillow") from exc
-        with Image.open(source) as image:
+            raise RuntimeError("Manual crop presets require the prepared-image runtime") from exc
+        prepared_bytes = prepared_derivative_service.preview_png(project_id, revision_id, filename)
+        with Image.open(io.BytesIO(prepared_bytes)) as image:
             source_width, source_height = image.size
 
         policy = manifest.get("training_resolution", {})
         step = max(8, int(policy.get("dimension_step", 16)))
         max_pixels = max(0.01, float(policy.get("max_megapixels", 1.0))) * 1_000_000
+        unit_w, unit_h = _aspect_units(aspect_ratio)
         base_w, base_h = _aligned_aspect_base(aspect_ratio, step)
         max_by_pixels = int(math.floor(math.sqrt(max_pixels / max(1, base_w * base_h))))
         max_by_source = min(source_width // base_w, source_height // base_h)
         multiplier = min(max_by_pixels, max_by_source) if bool(policy.get("bucket_no_upscale", True)) else max_by_pixels
+        aligned = multiplier >= 1
 
-        if multiplier < 1:
-            unit_w, unit_h = _aspect_units(aspect_ratio)
+        if aligned:
+            native_w, native_h = base_w * multiplier, base_h * multiplier
+        else:
             multiplier = max(1, min(source_width // unit_w, source_height // unit_h))
             native_w, native_h = unit_w * multiplier, unit_h * multiplier
-        else:
-            native_w, native_h = base_w * multiplier, base_h * multiplier
 
         candidates = [
             ("trainer", "Trainer native", multiplier),
@@ -292,17 +291,12 @@ class ImagePrepFlowService:
         rows: list[dict[str, Any]] = []
         seen: set[tuple[int, int]] = set()
         for preset_id, label, value in candidates:
-            if native_w == _aspect_units(aspect_ratio)[0] * multiplier and multiplier < 1:
-                width, height = native_w, native_h
-            elif base_w <= source_width and base_h <= source_height:
+            if aligned:
                 width, height = base_w * value, base_h * value
             else:
-                unit_w, unit_h = _aspect_units(aspect_ratio)
                 width, height = unit_w * value, unit_h * value
-            if width > source_width or height > source_height:
-                scale = min(source_width / max(1, width), source_height / max(1, height))
-                width = max(1, int(width * scale))
-                height = max(1, int(height * scale))
+            if preset_id == "trainer":
+                width, height = native_w, native_h
             key = (width, height)
             if key in seen:
                 continue
