@@ -10,7 +10,7 @@ import {
 } from "./activity-api";
 import { getProjectRevision, getRun, inspectDataset, type ProjectInfo } from "./api";
 import { CaptionsStagePage } from "./pages/CaptionsStagePage";
-import { ImagePrepWorkbenchPageV5 } from "./pages/ImagePrepWorkbenchPageV5";
+import { ImagePrepWorkbenchPageV6 } from "./pages/ImagePrepWorkbenchPageV6";
 import { PreferencesPage } from "./pages/PreferencesPage";
 import { SamplesPage } from "./pages/SamplesPage";
 import { StartPage } from "./pages/StartPage";
@@ -161,7 +161,7 @@ export default function App() {
           <div><strong>{activeTrainingFamily?.name ?? "Training"} models are not configured.</strong><span>Core DiT, text encoder and VAE weights must be configured before launching this training family.</span></div>
           <button className="secondary" type="button" onClick={() => navigate("/preferences#training-models")}>Setup now</button>
         </div>}
-        <Routes><Route path="/" element={<StartPage onImportProject={() => setTransferMode("import")} onExportProject={() => setTransferMode("export")} />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV5 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPageShell />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
+        <Routes><Route path="/" element={<StartPage onImportProject={() => setTransferMode("import")} onExportProject={() => setTransferMode("export")} />} /><Route path="/image-prep" element={<ImagePrepWorkbenchPageV6 />} /><Route path="/captions" element={<CaptionsStagePage />} /><Route path="/samples" element={<SamplesPage />} /><Route path="/training" element={<TrainingPageShell />} /><Route path="/preferences" element={<PreferencesPage />} /></Routes>
       </main>
       {notification && <div className={`runtime-global-toast ${notification.tone}`} role="status">{notification.message}</div>}
       {transferMode && <ProjectTransferDialog
