@@ -7,12 +7,15 @@ export type SampleDefinition = {
   width: number;
   height: number;
   cfg_scale: number;
+  configured_cfg_scale: number | null;
   seed: number;
+  configured_seed: number | null;
 };
 
 export type SamplingPlan = {
-  schema_version: 1;
+  schema_version: 2;
   enabled: boolean;
+  seed_policy: "explicit_per_sample";
   authoring: {
     seed_mode: SamplingSeedMode;
     seed_value: number;
@@ -26,8 +29,10 @@ export type SamplingPlan = {
     use_distilled: boolean;
     cache_model: SamplingCacheMode;
     steps: number;
+    configured_steps: number | null;
     negative_prompt: string;
     flow_shift: number | null;
+    configured_flow_shift: number | null;
   };
   samples: SampleDefinition[];
   updated_at: string | null;
