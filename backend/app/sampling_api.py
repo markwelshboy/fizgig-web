@@ -44,14 +44,18 @@ class SampleDefinition(BaseModel):
     prompt_template: str = Field(min_length=1, max_length=10000)
     width: int = Field(default=1024, ge=128, le=4096)
     height: int = Field(default=1024, ge=128, le=4096)
+    # cfg_scale / seed are the EFFECTIVE values consumed by the pinned Fizgig CLI.
+    # configured_* preserves the user's value while Turbo temporarily overrides it.
     cfg_scale: float = Field(default=1.0, ge=0, le=30)
+    configured_cfg_scale: float | None = Field(default=None, ge=0, le=30)
     seed: int = Field(default=42, ge=0, le=4294967295)
+    configured_seed: int | None = Field(default=None, ge=0, le=4294967295)
 
 
 class SamplingAuthoring(BaseModel):
-    # Fizgig's stock Krea preview renderer consumes one base seed and renders prompt i
-    # with base_seed+i, so increment is the least-surprising default for a new plan.
-    seed_mode: Literal["fixed", "increment"] = "increment"
+    # Retained for archive/backward compatibility. New samples use seed_value as a
+    # simple default seed; the UI no longer forces an auto-increment policy.
+    seed_mode: Literal["fixed", "increment"] = "fixed"
     seed_value: int = Field(default=42, ge=0, le=4294967295)
 
 
@@ -64,14 +68,19 @@ class SamplingSchedule(BaseModel):
 class SamplingRenderer(BaseModel):
     use_distilled: bool = True
     cache_model: Literal["auto", "on", "off"] = "auto"
+    # steps / flow_shift are the EFFECTIVE values consumed by the pinned Fizgig
+    # preview CLI. configured_* survives a Turbo on/off round trip.
     steps: int = Field(default=8, ge=1, le=500)
+    configured_steps: int | None = Field(default=None, ge=1, le=500)
     negative_prompt: str = Field(default="blurry, low detail, noisy, washed out, oversaturated, distorted", max_length=10000)
     flow_shift: float | None = Field(default=None, ge=0, le=100)
+    configured_flow_shift: float | None = Field(default=None, ge=0, le=100)
 
 
 class SamplingPlan(BaseModel):
-    schema_version: int = 1
+    schema_version: int = 2
     enabled: bool = True
+    seed_policy: Literal["explicit_per_sample"] = "explicit_per_sample"
     authoring: SamplingAuthoring = Field(default_factory=SamplingAuthoring)
     schedule: SamplingSchedule = Field(default_factory=SamplingSchedule)
     renderer: SamplingRenderer = Field(default_factory=SamplingRenderer)
@@ -86,28 +95,62 @@ def _path(project_id: str) -> Path:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
-def _normalize_sampling_plan(value: dict) -> dict:
-    """Apply the actual stock Krea Turbo preview contract.
+def _configured_number(value, fallback):
+    return fallback if value is None else value
 
-    Fizgig's Turbo preview path is 8-step and CFG-free. It also consumes one base
-    sample seed and renders prompt i with base_seed+i. Older web plans may still
-    contain generic 40-step / CFG 4.5 values or repeated per-prompt seeds from
-    before native preview wiring existed; normalize those representation details
-    rather than asking the user to run a separate "align" operation.
+
+def _normalize_sampling_plan(value: dict) -> dict:
+    """Return a lossless configured plan plus Fizgig-compatible effective values.
+
+    The user-facing settings are never destroyed when Turbo is toggled. The pinned
+    Fizgig Krea preview CLI still consumes 8 steps, CFG 1.0 and model-default flow
+    shift in Turbo mode, so those effective values remain in the legacy fields it
+    already understands while configured_* carries the user's dormant settings.
+
+    Fizgig standalone accepts only one base sample seed and internally uses seed+i.
+    fizgig-web retains that sequence in the effective `seed` field for CLI parity,
+    while configured_seed is the explicit per-sample seed used by our tiny preview-
+    only overlay. With no overlay, standalone behavior remains unchanged.
     """
     normalized = json.loads(json.dumps(value))
+    normalized["schema_version"] = 2
+    normalized["seed_policy"] = "explicit_per_sample"
+
+    authoring = normalized.setdefault("authoring", {})
+    authoring.setdefault("seed_mode", "fixed")
+    authoring.setdefault("seed_value", 42)
+
     renderer = normalized.setdefault("renderer", {})
+    renderer.setdefault("use_distilled", True)
+    renderer.setdefault("cache_model", "auto")
+    renderer.setdefault("negative_prompt", "")
+    configured_steps = int(_configured_number(renderer.get("configured_steps"), renderer.get("steps", 8)))
+    configured_flow_shift = _configured_number(renderer.get("configured_flow_shift"), renderer.get("flow_shift"))
+    renderer["configured_steps"] = configured_steps
+    renderer["configured_flow_shift"] = configured_flow_shift
+
+    samples = [sample for sample in normalized.get("samples", []) if isinstance(sample, dict)]
+    for sample in samples:
+        configured_cfg = float(_configured_number(sample.get("configured_cfg_scale"), sample.get("cfg_scale", 1.0)))
+        configured_seed = int(_configured_number(sample.get("configured_seed"), sample.get("seed", authoring.get("seed_value", 42))))
+        sample["configured_cfg_scale"] = configured_cfg
+        sample["configured_seed"] = configured_seed
+
     if renderer.get("use_distilled", True):
         renderer["steps"] = 8
         renderer["flow_shift"] = None
-        samples = [sample for sample in normalized.get("samples", []) if isinstance(sample, dict)]
-        base_seed = int(samples[0].get("seed", 42) or 42) if samples else int(normalized.get("authoring", {}).get("seed_value", 42) or 42)
+        base_seed = int(samples[0]["configured_seed"]) if samples else int(authoring.get("seed_value", 42))
         for index, sample in enumerate(samples):
             sample["cfg_scale"] = 1.0
             sample["seed"] = min(4294967295, base_seed + index)
-        authoring = normalized.setdefault("authoring", {})
-        authoring["seed_mode"] = "increment"
-        authoring["seed_value"] = min(4294967295, base_seed + len(samples))
+    else:
+        renderer["steps"] = configured_steps
+        renderer["flow_shift"] = configured_flow_shift
+        for sample in samples:
+            sample["cfg_scale"] = sample["configured_cfg_scale"]
+            sample["seed"] = sample["configured_seed"]
+
+    normalized["samples"] = samples
     return normalized
 
 
@@ -225,7 +268,8 @@ def get_sampling_plan(project_id: str):
     if not path.is_file():
         return _default()
     try:
-        value = SamplingPlan.model_validate_json(path.read_text(encoding="utf-8")).model_dump()
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        value = SamplingPlan.model_validate(raw).model_dump()
         return _normalize_sampling_plan(value)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Invalid sampling plan: {exc}") from exc
@@ -236,7 +280,7 @@ def update_sampling_plan(project_id: str, request: SamplingPlan):
     project_dir = project_store.project_dir(project_id)
     path = _path(project_id)
     value = _normalize_sampling_plan(request.model_dump())
-    value["schema_version"] = 1
+    value["schema_version"] = 2
     value["updated_at"] = _now()
     ids = [sample["id"] for sample in value["samples"]]
     if len(ids) != len(set(ids)):
