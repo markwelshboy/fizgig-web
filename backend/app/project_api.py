@@ -42,6 +42,38 @@ def _not_found(exc: Exception) -> HTTPException: return HTTPException(status_cod
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(json.dumps(value, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
+def _config_with_frozen_sampling(project_id: str, config: dict[str, Any]) -> dict[str, Any]:
+    """Make the project sampling plan part of the immutable run snapshot at Prepare.
+
+    The browser may already supply a normalized sampling object; preserve it when present.
+    Otherwise snapshot the project-owned sampling_plan.json here so every API caller gets the
+    same Prepare semantics. Start Training must never depend on later edits to the project plan.
+    """
+    frozen = json.loads(json.dumps(config))
+    if isinstance(frozen.get("sampling"), dict):
+        return frozen
+    path = project_store.project_dir(project_id) / "sampling_plan.json"
+    if not path.is_file():
+        frozen["sampling"] = {
+            "schema_version": 2,
+            "enabled": False,
+            "seed_policy": "explicit_per_sample",
+            "authoring": {"seed_mode": "fixed", "seed_value": 42},
+            "schedule": {"sample_at_start": False, "every_n_epochs": 0, "every_n_steps": 0},
+            "renderer": {"use_distilled": True, "cache_model": "auto", "steps": 8, "configured_steps": 8, "negative_prompt": "", "flow_shift": None, "configured_flow_shift": None},
+            "samples": [],
+            "updated_at": None,
+        }
+        return frozen
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"Project sampling plan is invalid: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError("Project sampling plan must contain an object")
+    frozen["sampling"] = value
+    return frozen
+
 def _restrict_project_to_selection(result: dict[str, Any], selected: list[str]) -> dict[str, Any]:
     """Creation snapshots the source first; this reduces that snapshot and initial project assets to the user's explicit selection."""
     if not selected:
@@ -287,7 +319,8 @@ def materialize_project_captions(project_id: str, revision_id: str):
 def create_run(project_id: str, request: RunCreate):
     try:
         project_caption_store.materialize_revision(project_id, request.dataset_revision)
-        run = project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=request.config)
+        frozen_config = _config_with_frozen_sampling(project_id, request.config)
+        run = project_store.create_run(project_id, name=request.name, model_family=request.model_family, dataset_revision=request.dataset_revision, trigger_word=request.trigger_word, config=frozen_config)
         run = image_prep_store.materialize_run_dataset(project_id, request.dataset_revision, run)
         project_policy_store.materialize_for_run(project_id, request.dataset_revision, run)
         caption_methodology_store.materialize_for_run(project_id, request.dataset_revision, run)
