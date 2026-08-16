@@ -4,12 +4,13 @@ import json
 import tempfile
 from pathlib import Path
 from typing import Any
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, File, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
 from .caption_methodologies import caption_methodology_store
 from .captioning import add_trigger, caption_service
 from .caption_templates import GRAMMAR_PROFILES, caption_template_store
 from .image_prep import image_prep_store
+from .image_prep_flow import image_prep_flow_service
 from .prepared_derivatives import prepared_derivative_service
 from .project_captions import project_caption_store
 from .project_policy import project_policy_store
@@ -196,6 +197,14 @@ def preview_caption_template(project_id: str, revision_id: str, request: dict[st
 def get_image_prep_state(project_id: str, revision_id: str):
     try: return image_prep_store.state(project_id, revision_id)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
+@router.post("/{project_id}/revisions/{revision_id}/prep/import-images")
+async def import_prep_images(project_id: str, revision_id: str, images: list[UploadFile] = File(...)):
+    try:
+        uploads = [(image.filename or "imported-image", await image.read()) for image in images]
+        return image_prep_flow_service.import_images(project_id, revision_id, uploads)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
 @router.put("/{project_id}/revisions/{revision_id}/prep/inclusion")
 def update_image_inclusion(project_id: str, revision_id: str, request: InclusionUpdate):
     try: return image_prep_store.set_inclusion(project_id, revision_id, request.filenames, request.included)
@@ -241,6 +250,12 @@ def delete_derivative(project_id: str, revision_id: str, filename: str):
     try: return prepared_derivative_service.delete_derivative(project_id, revision_id, filename)
     except FileNotFoundError as exc: raise _not_found(exc) from exc
     except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+@router.get("/{project_id}/revisions/{revision_id}/prep/manual-crop-presets")
+def manual_crop_presets(project_id: str, revision_id: str, filename: str, aspect_ratio: str = "1:1"):
+    try: return image_prep_flow_service.manual_crop_presets(project_id, revision_id, filename, aspect_ratio)
+    except FileNotFoundError as exc: raise _not_found(exc) from exc
+    except ValueError as exc: raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RuntimeError as exc: raise HTTPException(status_code=503, detail=str(exc)) from exc
 @router.post("/{project_id}/revisions/{revision_id}/prep/manual-crops")
 def create_manual_crop(project_id: str, revision_id: str, request: ManualCropCreate):
     try: return prepared_derivative_service.create_manual_crop(project_id, revision_id, request.filename, request.crop, request.aspect_ratio)
