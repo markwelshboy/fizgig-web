@@ -11,6 +11,7 @@ import "./derivative-hover.css";
 import "./image-prep-stage1.css";
 import "./exception-editor.css";
 import "./exception-editor-polish.css";
+import "./image-prep-v6.css";
 import "./caption-workbench.css";
 import "./caption-review-pager.css";
 import "./caption-template.css";
