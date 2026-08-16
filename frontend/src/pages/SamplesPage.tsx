@@ -25,6 +25,14 @@ function nextSampleId(samples: SampleDefinition[]) {
   return `sample-${String(max + 1).padStart(4, "0")}`;
 }
 
+function configuredCfg(sample: SampleDefinition) {
+  return sample.configured_cfg_scale ?? sample.cfg_scale ?? 1.0;
+}
+
+function configuredSeed(sample: SampleDefinition) {
+  return sample.configured_seed ?? sample.seed ?? 42;
+}
+
 export function SamplesPage() {
   const navigate = useNavigate();
   const { project, triggerWord } = useSession();
@@ -54,6 +62,9 @@ export function SamplesPage() {
   const dirty = Boolean(plan && JSON.stringify(plan) !== savedPlan);
   const resolvedTrigger = project?.trigger_word?.trim() || triggerWord.trim();
   const sampleCount = plan?.samples.length ?? 0;
+  const turbo = Boolean(plan?.renderer.use_distilled);
+  const configuredSteps = plan?.renderer.configured_steps ?? plan?.renderer.steps ?? 8;
+  const configuredFlowShift = plan?.renderer.configured_flow_shift ?? plan?.renderer.flow_shift ?? null;
 
   async function persist(next: SamplingPlan, success: string) {
     if (!project) return;
@@ -75,62 +86,55 @@ export function SamplesPage() {
     setPlan((current) => current ? { ...current, ...patch } : current);
   }
 
+  async function toggleSampling(enabled: boolean) {
+    if (!plan) return;
+    await persist({ ...plan, enabled }, enabled ? "Sampling enabled." : "Sampling disabled; saved settings are retained.");
+  }
+
   function setTurboSampling(enabled: boolean) {
-    setPlan((current) => {
-      if (!current) return current;
-      if (!enabled) return { ...current, renderer: { ...current.renderer, use_distilled: false } };
-      return {
-        ...current,
-        renderer: { ...current.renderer, use_distilled: true, steps: 8, flow_shift: null },
-        samples: current.samples.map((sample) => ({ ...sample, cfg_scale: 1.0 })),
-      };
-    });
-    if (enabled) setCfgScale(1.0);
+    setPlan((current) => current ? {
+      ...current,
+      renderer: { ...current.renderer, use_distilled: enabled },
+    } : current);
   }
 
   function resetEditor(keepShape = true) {
     setEditId(null);
     setPrompt(PROMPT_LIBRARY[libraryIndex].template);
-    if (!keepShape) { setWidth(1024); setHeight(1024); setCfgScale(plan?.renderer.use_distilled ? 1.0 : 4.5); }
-    else if (plan?.renderer.use_distilled) setCfgScale(1.0);
-    setEditSeed(plan?.authoring.seed_value ?? 42);
+    if (!keepShape) { setWidth(1024); setHeight(1024); }
+    setCfgScale(1.0);
+    setEditSeed(42);
   }
 
   function chooseLibraryPrompt(index: number) {
     setLibraryIndex(index);
     setPrompt(PROMPT_LIBRARY[index].template);
     setEditId(null);
+    setCfgScale(1.0);
+    setEditSeed(42);
   }
 
   async function saveSample() {
     if (!plan || !project || !prompt.trim()) return;
-    const concreteSeed = editId ? editSeed : plan.authoring.seed_value;
+    const configuredCfgScale = Math.max(0, Number(cfgScale));
+    const explicitSeed = Math.max(0, Math.min(4294967295, Math.round(editSeed)));
     const definition: SampleDefinition = {
       id: editId ?? nextSampleId(plan.samples),
       prompt_template: prompt.trim(),
       width: Math.max(128, Math.round(width)),
       height: Math.max(128, Math.round(height)),
-      cfg_scale: plan.renderer.use_distilled ? 1.0 : Math.max(0, Number(cfgScale)),
-      seed: Math.max(0, Math.round(concreteSeed)),
+      cfg_scale: turbo ? 1.0 : configuredCfgScale,
+      configured_cfg_scale: configuredCfgScale,
+      seed: explicitSeed,
+      configured_seed: explicitSeed,
     };
 
-    let samples: SampleDefinition[];
-    let authoring = plan.authoring;
-    if (editId) {
-      samples = plan.samples.map((sample) => sample.id === editId ? definition : sample);
-    } else {
-      samples = [...plan.samples, definition];
-      if (plan.authoring.seed_mode === "increment") {
-        authoring = { ...plan.authoring, seed_value: Math.min(4294967295, plan.authoring.seed_value + 1) };
-      }
-    }
-
-    const next = { ...plan, samples, authoring };
+    const samples = editId
+      ? plan.samples.map((sample) => sample.id === editId ? definition : sample)
+      : [...plan.samples, definition];
+    const next = { ...plan, samples };
     await persist(next, editId ? `${definition.id} updated.` : `${definition.id} added to the sampling set.`);
-    setEditId(null);
-    setPrompt(PROMPT_LIBRARY[libraryIndex].template);
-    setCfgScale(plan.renderer.use_distilled ? 1.0 : cfgScale);
-    setEditSeed(authoring.seed_value);
+    resetEditor();
   }
 
   function beginEdit(sample: SampleDefinition) {
@@ -138,24 +142,22 @@ export function SamplesPage() {
     setPrompt(sample.prompt_template);
     setWidth(sample.width);
     setHeight(sample.height);
-    setCfgScale(plan?.renderer.use_distilled ? 1.0 : sample.cfg_scale);
-    setEditSeed(sample.seed);
+    setCfgScale(configuredCfg(sample));
+    setEditSeed(configuredSeed(sample));
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   async function duplicateSample(sample: SampleDefinition) {
     if (!plan) return;
-    const sequentialSeed = plan.samples.length ? plan.samples[0].seed + plan.samples.length : sample.seed;
-    const copy = {
+    const copy: SampleDefinition = {
       ...sample,
       id: nextSampleId(plan.samples),
-      cfg_scale: plan.renderer.use_distilled ? 1.0 : sample.cfg_scale,
-      seed: plan.authoring.seed_mode === "increment" ? sequentialSeed : sample.seed,
+      cfg_scale: turbo ? 1.0 : configuredCfg(sample),
+      configured_cfg_scale: configuredCfg(sample),
+      seed: configuredSeed(sample),
+      configured_seed: configuredSeed(sample),
     };
-    const authoring = plan.authoring.seed_mode === "increment"
-      ? { ...plan.authoring, seed_value: Math.min(4294967295, copy.seed + 1) }
-      : plan.authoring;
-    const next = { ...plan, samples: [...plan.samples, copy], authoring };
+    const next = { ...plan, samples: [...plan.samples, copy] };
     await persist(next, `${copy.id} duplicated from ${sample.id}.`);
     beginEdit(copy);
   }
@@ -178,79 +180,86 @@ export function SamplesPage() {
   if (loading || !plan) return <section className="panel"><p className="muted">Loading sampling plan…</p>{message && <div className="notice error">{message}</div>}</section>;
 
   return <div className="stack sampling-page">
-    <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build a stable set of prompts, dimensions and seeds to compare progress throughout training. Krea Turbo previews use Fizgig's native 8-step CFG-free renderer.</p></div></header>
+    <header className="page-header"><div><p className="eyebrow">Evaluation probes</p><h1>Sampling</h1><p className="muted">Build stable evaluation probes for training. Choose whether to sample, how Fizgig should render, when to render, and finally what prompts / seeds to evaluate.</p></div></header>
 
-    <section className="panel stack sampling-base-panel">
-      <div className="sample-section-heading sampling-base-heading">
-        <div><p className="eyebrow">Base cadence</p><div className="card-title">When the sampling system runs</div><p className="muted">This cadence is the common baseline for the sample set. Generated preview images are preserved inside the training run for later review.</p></div>
-        <label className="sampling-enable-control inline-check"><input type="checkbox" checked={plan.enabled} onChange={(event) => patchPlan({ enabled: event.target.checked })} /> Enable sampling</label>
-      </div>
-      <fieldset className={`sampling-base-controls ${plan.enabled ? "" : "disabled"}`} disabled={!plan.enabled}>
-        <label className="inline-check"><input type="checkbox" checked={plan.schedule.sample_at_start} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, sample_at_start: event.target.checked } })} /> Sample at start</label>
-        <label>Every N epochs<input type="number" min={0} value={plan.schedule.every_n_epochs} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_epochs: Number(event.target.value) } })} /><span className="muted">0 disables epoch cadence.</span></label>
-        <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence. Current Krea in-training previews run at epoch boundaries.</span></label>
-      </fieldset>
-    </section>
+    <div className="sampling-master-row">
+      <label className="sampling-master-toggle inline-check"><input type="checkbox" checked={plan.enabled} disabled={saving} onChange={(event) => void toggleSampling(event.target.checked)} /> Enable Sampling</label>
+      <button className="secondary" onClick={() => void saveSettings()} disabled={saving || !dirty}>{saving ? "Saving…" : "Save Sampling Settings"}</button>
+    </div>
 
-    <section className="panel stack sample-editor-panel">
-      <div className="sample-section-heading"><div><p className="eyebrow">{editId ? "Edit sample" : "New sample"}</p><div className="card-title">{editId ?? "Compose an evaluation sample"}</div></div>{editId && <button className="secondary" onClick={() => resetEditor()}>Cancel edit</button>}</div>
-
-      <div className="sample-library-row">
-        <label>Prompt Library<select value={libraryIndex} title={PROMPT_LIBRARY[libraryIndex].template} onChange={(event) => chooseLibraryPrompt(Number(event.target.value))}>{PROMPT_LIBRARY.map((entry, index) => <option key={entry.name} value={index}>{entry.name}</option>)}</select></label>
-        <span className="muted sample-library-copy">Selecting a library entry places its full template in the Prompt box below. The library keeps <code>__trigger__</code> live rather than baking in the current project token.</span>
-      </div>
-
-      <label>Prompt template<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe the sample. Use __trigger__ wherever the current project trigger should be bound." /></label>
-      <div className="sample-resolved-preview"><span className="sample-preview-label">Resolved preview</span><TriggerTemplateText text={prompt || "Your prompt with __trigger__ will resolve here."} triggerWord={resolvedTrigger} /></div>
-
-      <div className="sample-definition-grid">
-        <label>Width<input type="number" min={128} max={4096} step={8} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
-        <label>Height<input type="number" min={128} max={4096} step={8} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
-        <label>CFG Scale<input type="number" min={0} max={30} step={0.1} value={plan.renderer.use_distilled ? 1.0 : cfgScale} disabled={plan.renderer.use_distilled} onChange={(event) => setCfgScale(Number(event.target.value))} /><span className="muted">{plan.renderer.use_distilled ? "Turbo previews are CFG-free; Fizgig uses CFG 1.0." : "Stored per sample for an undistilled renderer."}</span></label>
-        {editId ? <label>Seed<input type="number" min={0} max={4294967295} value={editSeed} onChange={(event) => setEditSeed(Number(event.target.value))} /><span className="muted">Concrete seed stored with this sample.</span></label> : <div className="sample-seed-field">
-          <span className="sample-field-label">Seed assignment</span>
-          <div className="sample-seed-box">
-            <div className="sample-seed-modes">
-              <label className="inline-check"><input type="radio" name="seed-mode" checked={plan.authoring.seed_mode === "fixed"} onChange={() => patchPlan({ authoring: { ...plan.authoring, seed_mode: "fixed" } })} /> Fixed Seed</label>
-              <label className="inline-check"><input type="radio" name="seed-mode" checked={plan.authoring.seed_mode === "increment"} onChange={() => patchPlan({ authoring: { ...plan.authoring, seed_mode: "increment" } })} /> Auto Increment</label>
-            </div>
-            <label>{plan.authoring.seed_mode === "fixed" ? "Seed" : "Next seed"}<input type="number" min={0} max={4294967295} value={plan.authoring.seed_value} onChange={(event) => patchPlan({ authoring: { ...plan.authoring, seed_value: Math.max(0, Number(event.target.value)) } })} /></label>
+    <fieldset className={`sampling-page-config ${plan.enabled ? "" : "disabled"}`} disabled={!plan.enabled}>
+      <section className="panel stack sampling-engine-panel">
+        <div><p className="eyebrow">Sampling engine</p><div className="card-title">How to sample</div><p className="muted">Renderer-level settings apply to the whole probe set. Turbo mode uses Fizgig's fast in-training Krea preview path while preserving any non-Turbo values you configure.</p></div>
+        <div className="sample-settings-grid">
+          <label className="inline-check"><input type="checkbox" checked={turbo} onChange={(event) => setTurboSampling(event.target.checked)} /> Use distilled / Turbo model for samples</label>
+          <label>Cache sample model<select value={plan.renderer.cache_model} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, cache_model: event.target.value as SamplingPlan["renderer"]["cache_model"] } })}><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
+          <div className="sampling-effective-pair">
+            <label>{turbo ? "Configured steps" : "Steps"}<input type="number" min={1} max={500} value={configuredSteps} disabled={turbo} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, configured_steps: Number(event.target.value) } })} /></label>
+            {turbo && <label className="sampling-effective-field">Effective steps<input type="number" value={8} readOnly /></label>}
           </div>
-        </div>}
-      </div>
-
-      <div className="actions"><button className="primary" onClick={saveSample} disabled={saving || !prompt.trim()}>{saving ? "Saving…" : editId ? "Save Changes" : "Add Sample"}</button></div>
-    </section>
-
-    <section className="panel stack">
-      <div className="sample-section-heading"><div><p className="eyebrow">Sample set</p><div className="card-title">{sampleCount} configured sample{sampleCount === 1 ? "" : "s"}</div></div></div>
-      {sampleRows.length ? <div className="sample-list">{sampleRows.map((sample, index) => <article className="sample-list-item" key={sample.id}>
-        <div className="sample-index">{index + 1}</div>
-        <div className="sample-list-copy">
-          <div className="sample-list-id">{sample.id}</div>
-          <div className="sample-list-prompt"><TriggerTemplateText text={sample.prompt_template} triggerWord={resolvedTrigger} /></div>
-          <div className="sample-list-meta"><span>{sample.width} × {sample.height}</span><span>CFG {plan.renderer.use_distilled ? "1.0" : sample.cfg_scale}</span><span>Seed {sample.seed}</span></div>
+          <div className="sampling-effective-pair">
+            <label><span className="sample-field-label-inline">{turbo ? "Configured Flow Shift" : "Flow Shift"} <small>Optional</small></span><input type="number" min={0} step={0.1} value={configuredFlowShift ?? ""} disabled={turbo} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, configured_flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
+            {turbo && <label className="sampling-effective-field">Effective Flow Shift<input value="Model default" readOnly /></label>}
+          </div>
         </div>
-        <div className="sample-list-actions"><button className="secondary" onClick={() => beginEdit(sample)}>Edit</button><button className="secondary" onClick={() => void duplicateSample(sample)}>Duplicate</button><button className="danger" onClick={() => void deleteSample(sample)}>Delete</button></div>
-      </article>)}</div> : <div className="sample-empty-state">No evaluation samples yet. Compose one above or start from the Prompt Library.</div>}
-      <p className="muted sample-trigger-note">Sample templates retain <code>__trigger__</code>. At run preparation the harness freezes this project plan; Krea currently expects one shared preview size and sequential base-seed + prompt-index seeds.</p>
-    </section>
+        <label>Negative prompt<textarea value={plan.renderer.negative_prompt} disabled={turbo} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, negative_prompt: event.target.value } })} /><span className="muted">{turbo ? "Saved but inactive while Turbo is CFG-free." : "Used when the renderer enables CFG."}</span></label>
+        {turbo
+          ? <div className="sample-distilled-note">Fast Fizgig preview contract: Turbo path, 8 effective steps, CFG 1.0 / CFG-free and model-default Flow Shift. Your configured non-Turbo values remain stored and reappear unchanged if Turbo is turned off.</div>
+          : <div className="notice warning">Non-Turbo values are preserved and editable, but the current Krea in-training preview launcher still requires the Fizgig Turbo path. Starting a run with sampling enabled in this mode will be blocked until the non-Turbo renderer is implemented.</div>}
+      </section>
 
-    <section className="panel stack">
-      <div><p className="eyebrow">Sampling engine</p><div className="card-title">Shared renderer settings</div><p className="muted">These controls describe how the entire sample set is rendered.</p></div>
-      <div className="sample-settings-grid">
-        <label className="inline-check"><input type="checkbox" checked={plan.renderer.use_distilled} onChange={(event) => setTurboSampling(event.target.checked)} /> Use distilled / turbo model for samples</label>
-        <label>Cache sample model<select value={plan.renderer.cache_model} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, cache_model: event.target.value as SamplingPlan["renderer"]["cache_model"] } })}><option value="auto">Auto</option><option value="on">On</option><option value="off">Off</option></select></label>
-        <label>Steps<input type="number" min={1} max={500} value={plan.renderer.use_distilled ? 8 : plan.renderer.steps} disabled={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, steps: Number(event.target.value) } })} /><span className="muted">{plan.renderer.use_distilled ? "Turbo is fixed at 8 denoising steps." : "Renderer denoising steps."}</span></label>
-        <label><span className="sample-field-label-inline">Flow Shift <small>Optional</small></span><input type="number" min={0} step={0.1} value={plan.renderer.use_distilled ? "" : plan.renderer.flow_shift ?? ""} disabled={plan.renderer.use_distilled} placeholder="Model default" onChange={(event) => patchPlan({ renderer: { ...plan.renderer, flow_shift: event.target.value === "" ? null : Number(event.target.value) } })} /></label>
-      </div>
-      <label>Negative prompt<textarea value={plan.renderer.negative_prompt} disabled={plan.renderer.use_distilled} onChange={(event) => patchPlan({ renderer: { ...plan.renderer, negative_prompt: event.target.value } })} /><span className="muted">{plan.renderer.use_distilled ? "Unused in the Turbo CFG-free path." : "Used when the renderer enables CFG."}</span></label>
-      <div className="sample-distilled-note">{plan.renderer.use_distilled ? "Krea Turbo preview contract: RAW training DiT + Turbo preview path, 8 steps, CFG 1.0 / CFG-free. Generic 40-step and CFG 4.5 values are not passed into training." : "Undistilled sampling remains part of the project schema, but the current Krea in-training preview path uses Turbo mode."}</div>
-      <div className="actions"><button className="secondary" onClick={() => void saveSettings()} disabled={saving || !dirty}>{saving ? "Saving…" : "Save Sampling Settings"}</button></div>
-    </section>
+      <section className="panel stack sampling-base-panel">
+        <div className="sample-section-heading sampling-base-heading">
+          <div><p className="eyebrow">Base cadence</p><div className="card-title">When to sample</div><p className="muted">This cadence is shared by the sample set. Generated preview images are preserved inside the training run for later review.</p></div>
+        </div>
+        <div className="sampling-base-controls">
+          <label className="inline-check sampling-start-check"><input type="checkbox" checked={plan.schedule.sample_at_start} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, sample_at_start: event.target.checked } })} /> Sample at start</label>
+          <label>Every N epochs<input type="number" min={0} value={plan.schedule.every_n_epochs} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_epochs: Number(event.target.value) } })} /><span className="muted">0 disables epoch cadence.</span></label>
+          <label>Every N steps<input type="number" min={0} value={plan.schedule.every_n_steps} onChange={(event) => patchPlan({ schedule: { ...plan.schedule, every_n_steps: Number(event.target.value) } })} /><span className="muted">0 disables step cadence. Current Krea in-training previews run at epoch boundaries.</span></label>
+        </div>
+      </section>
+
+      <section className="panel stack sample-editor-panel">
+        <div className="sample-section-heading"><div><p className="eyebrow">{editId ? "Edit sample" : "New sample"}</p><div className="card-title">{editId ?? "What to sample"}</div><p className="muted">Each probe keeps its own prompt, dimensions and explicit seed. Turbo temporarily overrides CFG to 1.0 without discarding the value you configured.</p></div>{editId && <button className="secondary" onClick={() => resetEditor()}>Cancel edit</button>}</div>
+
+        <div className="sample-library-row">
+          <label>Prompt Library<select value={libraryIndex} title={PROMPT_LIBRARY[libraryIndex].template} onChange={(event) => chooseLibraryPrompt(Number(event.target.value))}>{PROMPT_LIBRARY.map((entry, index) => <option key={entry.name} value={index}>{entry.name}</option>)}</select></label>
+          <span className="muted sample-library-copy">Selecting a library entry places its full template in the Prompt box below. The library keeps <code>__trigger__</code> live rather than baking in the current project token.</span>
+        </div>
+
+        <label>Prompt template<textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Describe the sample. Use __trigger__ wherever the current project trigger should be bound." /></label>
+        <div className="sample-resolved-preview"><span className="sample-preview-label">Resolved preview</span><TriggerTemplateText text={prompt || "Your prompt with __trigger__ will resolve here."} triggerWord={resolvedTrigger} /></div>
+
+        <div className="sample-definition-grid sampling-definition-grid">
+          <label>Width<input type="number" min={128} max={4096} step={8} value={width} onChange={(event) => setWidth(Number(event.target.value))} /></label>
+          <label>Height<input type="number" min={128} max={4096} step={8} value={height} onChange={(event) => setHeight(Number(event.target.value))} /></label>
+          <div className="sampling-effective-pair">
+            <label>{turbo ? "Configured CFG" : "CFG Scale"}<input type="number" min={0} max={30} step={0.1} value={cfgScale} disabled={turbo} onChange={(event) => setCfgScale(Number(event.target.value))} /></label>
+            {turbo && <label className="sampling-effective-field">Effective CFG<input type="number" value={1.0} readOnly /></label>}
+          </div>
+          <label>Seed<input type="number" min={0} max={4294967295} value={editSeed} onChange={(event) => setEditSeed(Number(event.target.value))} /><span className="muted">Explicit seed for this probe. New samples default to 42.</span></label>
+        </div>
+
+        <div className="actions"><button className="primary" onClick={saveSample} disabled={saving || !prompt.trim()}>{saving ? "Saving…" : editId ? "Save Changes" : "Add Sample"}</button></div>
+      </section>
+
+      <section className="panel stack">
+        <div className="sample-section-heading"><div><p className="eyebrow">Sample set</p><div className="card-title">{sampleCount} configured sample{sampleCount === 1 ? "" : "s"}</div></div></div>
+        {sampleRows.length ? <div className="sample-list">{sampleRows.map((sample, index) => <article className="sample-list-item" key={sample.id}>
+          <div className="sample-index">{index + 1}</div>
+          <div className="sample-list-copy">
+            <div className="sample-list-id">{sample.id}</div>
+            <div className="sample-list-prompt"><TriggerTemplateText text={sample.prompt_template} triggerWord={resolvedTrigger} /></div>
+            <div className="sample-list-meta"><span>{sample.width} × {sample.height}</span><span>{turbo ? `CFG 1.0 effective · ${configuredCfg(sample)} configured` : `CFG ${configuredCfg(sample)}`}</span><span>Seed {configuredSeed(sample)}</span></div>
+          </div>
+          <div className="sample-list-actions"><button className="secondary" onClick={() => beginEdit(sample)}>Edit</button><button className="secondary" onClick={() => void duplicateSample(sample)}>Duplicate</button><button className="danger" onClick={() => void deleteSample(sample)}>Delete</button></div>
+        </article>)}</div> : <div className="sample-empty-state">No evaluation samples yet. Compose one above or start from the Prompt Library.</div>}
+        <p className="muted sample-trigger-note">Sample templates retain <code>__trigger__</code>. At run preparation the harness freezes this project plan. Explicit per-sample seeds are preserved for the fizgig-web preview overlay; the underlying standalone CLI still receives its normal base-seed fallback.</p>
+      </section>
+    </fieldset>
 
     {message && <div className={message.toLowerCase().includes("unable") || message.toLowerCase().includes("invalid") ? "notice error" : "notice success"}>{message}</div>}
 
-    <section className="panel sample-stage-footer"><div><strong>Sampling configuration</strong><div className="muted">{sampleCount ? `${sampleCount} stable evaluation probe${sampleCount === 1 ? "" : "s"} ready to carry into training.` : "Sampling is optional; add probes if you want consistent visual comparisons during training."}</div></div><button className="primary" onClick={() => navigate("/training")}>Continue to <strong>Training</strong> →</button></section>
+    <section className="panel sample-stage-footer"><div><strong>Sampling configuration</strong><div className="muted">{plan.enabled ? (sampleCount ? `${sampleCount} stable evaluation probe${sampleCount === 1 ? "" : "s"} ready to carry into training.` : "Sampling is enabled; add at least one probe before starting a sampled run.") : "Sampling is disabled; the saved probe configuration remains attached to the project."}</div></div><button className="primary" onClick={() => navigate("/training")}>Continue to <strong>Training</strong> →</button></section>
   </div>;
 }
