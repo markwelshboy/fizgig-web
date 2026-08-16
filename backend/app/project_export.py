@@ -244,6 +244,78 @@ def _read_project(project_dir: Path) -> dict[str, Any]:
     return json.loads((project_dir / "project.json").read_text(encoding="utf-8"))
 
 
+def _read_optional_json(path: Path) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _sampling_archive_summary(project_dir: Path, selected: set[str]) -> dict[str, Any]:
+    """Expose sampling provenance in archive_manifest without duplicating the full JSON payloads."""
+    project_plan = _read_optional_json(project_dir / "sampling_plan.json")
+    project_plan_included = "project_core" in selected and project_plan is not None
+    project_summary: dict[str, Any] = {
+        "path": "sampling_plan.json",
+        "present": project_plan is not None,
+        "included": project_plan_included,
+    }
+    if project_plan is not None:
+        project_summary.update({
+            "schema_version": project_plan.get("schema_version"),
+            "seed_policy": project_plan.get("seed_policy"),
+            "enabled": bool(project_plan.get("enabled")),
+            "sample_count": len(project_plan.get("samples") or []),
+        })
+
+    frozen_runs: list[dict[str, Any]] = []
+    runtime_snapshots: list[dict[str, Any]] = []
+    if "run_metadata" in selected:
+        runs_dir = project_dir / "runs"
+        if runs_dir.is_dir():
+            for run_dir in sorted((path for path in runs_dir.iterdir() if path.is_dir()), key=lambda path: path.name):
+                run_json = _read_optional_json(run_dir / "run.json")
+                if run_json is not None:
+                    config = run_json.get("config") if isinstance(run_json.get("config"), dict) else {}
+                    sampling = config.get("sampling") if isinstance(config, dict) else None
+                    if isinstance(sampling, dict):
+                        frozen_runs.append({
+                            "run_id": run_dir.name,
+                            "path": f"runs/{run_dir.name}/run.json",
+                            "schema_version": sampling.get("schema_version"),
+                            "seed_policy": sampling.get("seed_policy"),
+                            "enabled": bool(sampling.get("enabled")),
+                            "sample_count": len(sampling.get("samples") or []),
+                        })
+                snapshot = _read_optional_json(run_dir / "sampling_snapshot.json")
+                if snapshot is not None:
+                    runtime_snapshots.append({
+                        "run_id": run_dir.name,
+                        "path": f"runs/{run_dir.name}/sampling_snapshot.json",
+                        "schema_version": snapshot.get("schema_version"),
+                        "active": bool(snapshot.get("active")),
+                        "plan_source": snapshot.get("plan_source"),
+                    })
+
+    return {
+        "project_plan": project_summary,
+        "frozen_run_configs": {
+            "included": "run_metadata" in selected,
+            "count": len(frozen_runs),
+            "runs": frozen_runs,
+        },
+        "runtime_snapshots": {
+            "included": "run_metadata" in selected,
+            "count": len(runtime_snapshots),
+            "runs": runtime_snapshots,
+        },
+        "contract": "sampling_plan.json is editable project state; run.json config.sampling is frozen at Prepare; sampling_snapshot.json records resolved/effective Start-time settings.",
+    }
+
+
 def export_options(project_dir: Path, project_id: str) -> dict[str, Any]:
     inventory = inventory_project(project_dir)
     components = []
@@ -337,10 +409,12 @@ def _archive_manifest(
         "components": component_rows,
         "selected_components": sorted(selected),
         "estimated_uncompressed_bytes": sum(row["bytes"] for row in component_rows if row["selected"]),
+        "sampling": _sampling_archive_summary(project_dir, selected),
         "notes": [
             "Components are classified into non-overlapping groups so size estimates can be summed.",
             "Symbolic links are never exported.",
             "The manifest describes intended archive semantics; import may select a dependency-safe subset.",
+            "Sampling values remain authoritative in sampling_plan.json and each run.json; the manifest summarizes their presence/schema without duplicating every probe value.",
         ],
     }
     return (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
