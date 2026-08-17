@@ -1,3 +1,5 @@
+export {};
+
 const ROOT = ".image-prep-v6";
 let globalDraftDirty = false;
 let scheduled = false;
