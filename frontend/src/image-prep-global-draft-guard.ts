@@ -15,33 +15,15 @@ function updateDirtyState(root: Element) {
   globalDraftDirty = !saveButton.disabled && /Save Global Preparation/.test(saveButton.textContent || "");
 }
 
-function removeNotice(root: Element) {
-  root.querySelector(".v6-global-draft-notice")?.remove();
-}
-
-function addNotice(root: Element, tool: string) {
-  if (!globalDraftDirty || tool === "Global Preparation") {
-    removeNotice(root);
-    return;
-  }
-  const panel = root.querySelector(".v6-tool-panel");
-  if (!panel || panel.querySelector(".v6-global-draft-notice")) return;
-  const notice = document.createElement("div");
-  notice.className = "notice warning v6-global-draft-notice";
-  notice.innerHTML = "<strong>Unsaved Global Preparation changes are not applied here.</strong> This tool is using the last saved prepared-image state. Save Global Preparation to update downstream tools.";
-  panel.insertBefore(notice, panel.firstChild);
-}
-
 function enforceSavedPerImagePreview(root: Element, tool: string) {
   if (!globalDraftDirty || tool !== "Per-image Review") return;
 
-  // The selected Working Assets thumbnail is always sourced from the backend
-  // prepared-preview endpoint outside Global Preparation, so it represents the
-  // last committed global transform.  Use that image while the global draft is
-  // dirty instead of allowing the transient React globalDraft filter to leak into
-  // Per-image Review.  Crop-box interaction remains live; tonal per-image preview
-  // waits until the global draft is committed, which keeps the evaluation basis
-  // unambiguous.
+  // Outside Global Preparation, Working Assets always uses the backend prepared
+  // preview and therefore represents the last committed global transform. While a
+  // global draft exists, use that committed image as the Per-image Review basis so
+  // transient global slider changes cannot leak into downstream derivative/review
+  // decisions. Crop-box interaction remains live; tonal per-image preview resumes
+  // normally once the global draft is committed.
   const prepared = root.querySelector<HTMLImageElement>(".v6-working-card.selected .v6-working-image img");
   const review = root.querySelector<HTMLImageElement>(".v6-tool-panel .position-crop-canvas > img");
   if (!prepared || !review || !prepared.src) return;
@@ -57,7 +39,7 @@ function refresh() {
   if (!root) return;
   updateDirtyState(root);
   const tool = selectedTool(root);
-  addNotice(root, tool);
+  root.classList.toggle("v6-global-draft-dirty", globalDraftDirty && tool !== "Global Preparation");
   enforceSavedPerImagePreview(root, tool);
 }
 
