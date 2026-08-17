@@ -1,0 +1,146 @@
+/* Final Working Assets interaction polish. Loaded after the earlier V6 sheets. */
+
+/* Only show the expand affordance when the square working-card viewport is actually
+   clipping a non-square prepared image. The TS classifier adds this class from the
+   image's natural dimensions, so it also works on disabled/read-only cards. */
+.image-prep-v6 .v6-working-image::after {
+  content: none !important;
+}
+
+.image-prep-v6 .v6-working-image.v6-preview-needs-fit::after {
+  content: "↗↙" !important;
+  position: absolute;
+  z-index: 7;
+  top: 7px;
+  right: 7px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .42);
+  border-radius: 7px;
+  background: rgba(4, 10, 18, .82);
+  color: #eef2ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  pointer-events: none;
+}
+
+/* Undo the previous universal hover-to-contain behavior. Square/full previews stay
+   stable; only genuinely clipped cards expand to show the whole prepared image. */
+.image-prep-v6 .v6-working-image:not(.v6-preview-needs-fit):hover > img {
+  object-fit: cover;
+  object-position: center;
+}
+
+.image-prep-v6 .v6-working-image.v6-preview-needs-fit:hover > img {
+  object-fit: contain;
+  object-position: center;
+  background: #050d17;
+}
+
+.image-prep-v6 .v6-working-image.v6-preview-needs-fit:hover::after {
+  border-color: rgba(167, 139, 250, .88);
+  background: rgba(76, 29, 149, .88);
+  color: #fff;
+}
+
+/* The explicit composition-crop diagnostic remains data-bearing in the DOM, but
+   the visible ↗↙ icon now describes preview clipping rather than trainer cropping. */
+.image-prep-v6 .v6-working-image .v6-crop-flag {
+  display: none !important;
+}
+
+/* Global Preparation intentionally locks selection. Do not dim the image just
+   because the button is disabled: the whole point is to judge the live tonal edit.
+   Dim only the read-only check mark so its locked state is obvious. */
+.image-prep-v6 .v6-tool-tabs:has(button:first-child.selected) ~ .v6-tool-panel + * {
+  /* no-op anchor for older Chromium; actual disabled-card rule below is scoped */
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:first-child.selected) .v6-working-card:disabled:not(.unavailable) {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:first-child.selected) .v6-working-card:disabled:not(.unavailable) .v6-tool-check {
+  opacity: .42;
+  filter: saturate(.45);
+}
+
+/* Face Derivatives: the RHS is the selection surface, so place the bulk selection
+   controls directly under its mode label instead of in the tool editor. */
+.image-prep-v6 .v6-processing-layout {
+  position: relative;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-working-heading {
+  padding-bottom: 54px;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-working-heading small {
+  font-size: 0;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-working-heading small::after {
+  content: "Multi-select assets";
+  font-size: 11px;
+  color: #91a3ba;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection {
+  position: absolute;
+  z-index: 10;
+  top: 64px;
+  right: 14px;
+  width: calc(33.333% - 28px);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection .micro-action {
+  font-size: 0;
+  padding: 5px 9px;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection .micro-action:first-child::after {
+  content: "Select All";
+  font-size: 11px;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection .micro-action:nth-child(2)::after {
+  content: "Deselect All";
+  font-size: 11px;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection .selection-count {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+@media (max-width: 1180px) and (min-width: 901px) {
+  .image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection {
+    width: calc(39.2% - 28px);
+  }
+}
+
+@media (max-width: 900px) {
+  /* Once the workbench stacks vertically there is no stable RHS column to overlay.
+     Return the bulk controls to normal flow rather than positioning them off-screen. */
+  .image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-working-heading {
+    padding-bottom: 14px;
+  }
+  .image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection {
+    position: static;
+    width: auto;
+    margin-top: -4px;
+  }
+}
