@@ -13,6 +13,7 @@ import "./exception-editor.css";
 import "./exception-editor-polish.css";
 import "./image-prep-v6.css";
 import "./image-prep-v6-polish.css";
+import "./image-prep-v6-interaction-polish.css";
 import "./caption-workbench.css";
 import "./caption-review-pager.css";
 import "./caption-template.css";
