@@ -20,14 +20,40 @@ function classifyWorkingImage(shell: Element) {
   else image.addEventListener("load", apply, { once: true });
 }
 
+function refreshFaceSelectionLabels() {
+  const root = document.querySelector(".image-prep-v6");
+  if (!root) return;
+  const faceSelected = Boolean(root.querySelector(".v6-tool-tabs button:nth-child(2).selected"));
+  if (!faceSelected) return;
+
+  const mode = root.querySelector(".v6-working-heading small");
+  if (mode && mode.textContent !== "Multi-select assets") mode.textContent = "Multi-select assets";
+
+  const buttons = root.querySelectorAll<HTMLButtonElement>(".v6-face-source-selection .micro-action");
+  if (buttons[0] && buttons[0].textContent !== "Select All") {
+    buttons[0].textContent = "Select All";
+    buttons[0].setAttribute("aria-label", "Select All");
+  }
+  if (buttons[1] && buttons[1].textContent !== "Deselect All") {
+    buttons[1].textContent = "Deselect All";
+    buttons[1].setAttribute("aria-label", "Deselect All");
+  }
+}
+
 function refreshWorkingImages() {
   document.querySelectorAll(WORKING_IMAGE_SELECTOR).forEach(classifyWorkingImage);
+  refreshFaceSelectionLabels();
 }
 
 function install() {
   refreshWorkingImages();
   const observer = new MutationObserver(() => refreshWorkingImages());
-  observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] });
+  observer.observe(document.body, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ["src", "class"],
+  });
   window.addEventListener("resize", refreshWorkingImages, { passive: true });
 }
 
