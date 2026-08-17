@@ -1,0 +1,136 @@
+/* Interaction polish for the V6 Image Prep workbench.
+   Loaded after the existing V6 + V6 polish sheets so these are deliberately local overrides. */
+
+/* --------------------------------------------------------------------------
+   Working Assets: every thumbnail is a compact cover-preview.  The expand glyph
+   is therefore an affordance for "hover to fit the complete prepared image",
+   rather than a fragile proxy for whether the trainer-resolution row happened
+   to report a composition crop.  This also works on disabled/read-only cards.
+   -------------------------------------------------------------------------- */
+.image-prep-v6 .v6-working-image {
+  background: #050d17;
+}
+
+.image-prep-v6 .v6-working-image > img {
+  transition: object-fit 140ms ease, transform 140ms ease, background-color 140ms ease;
+}
+
+.image-prep-v6 .v6-working-image:hover > img {
+  object-fit: contain;
+  object-position: center;
+  background: #050d17;
+}
+
+.image-prep-v6 .v6-working-image::after {
+  content: "↗↙";
+  position: absolute;
+  z-index: 6;
+  top: 7px;
+  right: 7px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .42);
+  border-radius: 7px;
+  background: rgba(4, 10, 18, .82);
+  color: #eef2ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  pointer-events: none;
+  transition: border-color 140ms ease, color 140ms ease, background-color 140ms ease;
+}
+
+.image-prep-v6 .v6-working-image:hover::after {
+  border-color: rgba(167, 139, 250, .88);
+  background: rgba(76, 29, 149, .88);
+  color: #fff;
+}
+
+/* The old arrow represented only an explicit composition-crop diagnostic.  Keep
+   the diagnostic data, but avoid two different arrow meanings in the same card. */
+.image-prep-v6 .v6-working-image .v6-crop-flag {
+  display: none;
+}
+
+/* LOW DETAIL still occupies the diagnostic stack; move it below the universal
+   hover-to-fit affordance in the upper-right corner. */
+.image-prep-v6 .v6-working-image .v6-card-flags {
+  top: 36px;
+}
+
+/* --------------------------------------------------------------------------
+   Manual crop editor: while a custom crop is below half of the trainer pixel
+   target, make the live crop-size readout amber as well as the consequence row.
+   :has() is supported by the Chromium target used by the web harness and means
+   the colour follows live drag geometry without adding another React state path.
+   -------------------------------------------------------------------------- */
+.image-prep-v6 .trainer-manual-editor:has(.manual-crop-consequence.low-detail) .crop-size-label {
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, .7);
+  background: rgba(92, 42, 10, .9);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .32);
+}
+
+/* --------------------------------------------------------------------------
+   Tool tabs: present them as one explicit tabbed control rather than four loose
+   buttons in the page flow.  The pseudo-legend gives the requested fieldset-like
+   "Tools" label without changing the component DOM or keyboard behaviour.
+   -------------------------------------------------------------------------- */
+.image-prep-v6 .v6-tool-tabs {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 20px;
+  padding: 15px 10px 10px;
+  border: 1px solid rgba(238, 242, 255, .62);
+  border-radius: 10px;
+  background: rgba(5, 13, 23, .18);
+}
+
+.image-prep-v6 .v6-tool-tabs::before {
+  content: "Tools";
+  position: absolute;
+  left: 13px;
+  top: -9px;
+  padding: 0 7px;
+  background: #0d1828;
+  color: #eef2ff;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 17px;
+  letter-spacing: .01em;
+}
+
+.image-prep-v6 .v6-tool-tabs button {
+  min-width: 132px;
+  border-color: rgba(238, 242, 255, .52);
+  background: rgba(10, 20, 34, .72);
+  color: #b9c5d7;
+}
+
+.image-prep-v6 .v6-tool-tabs button:hover {
+  border-color: rgba(167, 139, 250, .82);
+  color: #fff;
+}
+
+.image-prep-v6 .v6-tool-tabs button.selected {
+  border-color: #7c83ff;
+  background: linear-gradient(90deg, #5265d8, #6574e8);
+  color: #fff;
+  box-shadow: 0 0 0 1px rgba(124, 131, 255, .16) inset;
+}
+
+@media (max-width: 900px) {
+  .image-prep-v6 .v6-tool-tabs button {
+    min-width: 0;
+    flex: 1 1 180px;
+  }
+}
