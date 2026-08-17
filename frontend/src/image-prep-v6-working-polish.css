@@ -110,9 +110,17 @@
 }
 
 /* When a global draft exists, downstream tools intentionally use the last saved
-   prepared-image state. Keep that contract visible without consuming much space. */
-.image-prep-v6 .v6-global-draft-notice {
-  margin-bottom: 4px;
+   prepared-image state. The TS guard toggles this class without inserting nodes
+   into React's DOM tree. */
+.image-prep-v6.v6-global-draft-dirty .v6-tool-panel::before {
+  content: "Unsaved Global Preparation changes are not applied here. This tool is using the last saved prepared-image state; save Global Preparation to update downstream tools.";
+  display: block;
+  margin-bottom: 10px;
   padding: 8px 10px;
+  border: 1px solid rgba(245, 158, 11, .48);
+  border-radius: 8px;
+  background: rgba(180, 83, 9, .12);
+  color: #fbbf24;
   font-size: 11px;
+  line-height: 1.35;
 }
