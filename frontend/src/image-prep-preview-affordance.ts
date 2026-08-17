@@ -1,3 +1,5 @@
+export {};
+
 const WORKING_IMAGE_SELECTOR = ".image-prep-v6 .v6-working-image";
 
 function classifyWorkingImage(shell: Element) {
