@@ -5,6 +5,7 @@ import App from "./App";
 import { SessionProvider } from "./session";
 import "@tabler/icons-webfont/dist/tabler-icons.min.css";
 import "./image-prep-preview-affordance";
+import "./image-prep-global-draft-guard";
 import "./styles.css";
 import "./data-ui.css";
 import "./prep-refinements.css";
