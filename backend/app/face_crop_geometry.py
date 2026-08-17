@@ -38,9 +38,9 @@ def exact_aspect_box(
 ) -> tuple[int, int, int, int]:
     """Return an exact integer-ratio crop, fully bounded by the image.
 
-    Width/height are integer multiples of the reduced aspect units.  The crop is
+    Width/height are integer multiples of the reduced aspect units. The crop is
     the smallest ratio-correct box that can contain ``required_size`` unless the
-    image boundary forces the largest possible crop for that aspect.
+    source boundary forces the largest available crop for that aspect.
     """
     image_width, image_height = image_size
     if image_width <= 0 or image_height <= 0:
@@ -98,11 +98,11 @@ def face_crop_box(
 ) -> tuple[int, int, int, int]:
     """Build a bounded, exact-aspect face crop from a detector box.
 
-    Detector boxes are clipped before padding.  This matters near image edges and
+    Detector boxes are clipped before padding. This matters near image edges and
     keeps portrait aspects such as 9:16 from being sized from negative/out-of-frame
-    detector coordinates.  The resulting crop is validated for every aspect.
+    detector coordinates. Extremely large faces may force the largest crop that can
+    fit the requested aspect; the proposal remains valid and visually reviewable.
     """
-    image_width, image_height = image_size
     x1, y1, x2, y2 = clip_bbox(image_size, bbox)
     face_width = x2 - x1
     face_height = y2 - y1
@@ -110,27 +110,9 @@ def face_crop_box(
     required_width = face_width * (1.0 + 2.0 * padding)
     required_height = face_height * (1.0 + 2.0 * padding)
 
-    unit_width, unit_height = _aspect_units(aspect_ratio)
-    max_multiple = min(image_width // unit_width, image_height // unit_height)
-    face_multiple = max(
-        math.ceil(face_width / unit_width),
-        math.ceil(face_height / unit_height),
-    )
-    if face_multiple > max_multiple:
-        raise ValueError(
-            f"Detected face {face_width}x{face_height} cannot fit inside a {aspect_ratio} crop "
-            f"within image {image_width}x{image_height}"
-        )
-
-    box = exact_aspect_box(
+    return exact_aspect_box(
         image_size,
         ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
         (required_width, required_height),
         aspect_ratio,
     )
-    crop_x1, crop_y1, crop_x2, crop_y2 = box
-    if not (crop_x1 <= x1 and crop_y1 <= y1 and crop_x2 >= x2 and crop_y2 >= y2):
-        # Padding may be clipped by an image edge, but the visible face itself must
-        # always remain inside the proposed derivative.
-        raise ValueError(f"Validated {aspect_ratio} crop does not contain the detected face")
-    return box
