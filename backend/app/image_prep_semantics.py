@@ -5,6 +5,7 @@ import importlib
 from typing import Any
 
 from . import image_prep as prep
+from .face_crop_geometry import exact_aspect_box, face_crop_box
 
 prep.DEFAULT_GLOBAL_TRANSFORM.update({
     "aspect_ratio": "source",
@@ -95,3 +96,13 @@ def face_detector():
 prep._effective_transform = effective_transform
 prep._crop_box = crop_box
 prep._face_detector = face_detector
+prep._exact_aspect_box = exact_aspect_box
+prep._face_crop_box = face_crop_box
+
+# The active project API uses PreparedDerivativeService for manual/face derivatives.
+# Patch its geometry too so proposal previews and accepted derivatives use the same
+# bounded exact-aspect implementation for 1:1, 4:5, 5:4, 9:16 and 16:9.
+from . import prepared_derivatives as prepared  # noqa: E402
+
+prepared._exact_aspect_box = exact_aspect_box
+prepared._face_crop_box = face_crop_box
