@@ -1,5 +1,7 @@
 """Fizgig Web backend."""
 
 # Keep Image Prep policy semantics consistent while the POC is being iterated.
-# This imports the core module and patches only its source/derivative crop policy.
+# These imports patch the core modules at package import time so all API paths use
+# the same source/derivative semantics and validated crop geometry.
 from . import image_prep_semantics as _image_prep_semantics  # noqa: F401,E402
+from . import prepared_derivative_semantics as _prepared_derivative_semantics  # noqa: F401,E402
