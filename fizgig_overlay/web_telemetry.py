@@ -92,6 +92,15 @@ def emit_decision_snapshot(*, epoch: int, stats: dict[str, dict[str, Any]],
     }
     recommended_multipliers = recommended_multipliers or {}
     effective_multipliers = effective_multipliers or {}
+    policy_lookup: dict[str, dict[str, Any]] = {}
+    try:
+        root = _root()
+        if root is not None:
+            from fizgig.training.web_policy import load_asset_policy
+            policy_lookup = load_asset_policy(str(root / "dataset"))
+    except Exception:
+        policy_lookup = {}
+
     for key, state in stats.items():
         if "|" in str(key):
             continue
@@ -100,6 +109,15 @@ def emit_decision_snapshot(*, epoch: int, stats: dict[str, dict[str, Any]],
             item["recommended_multiplier"] = float(recommended_multipliers[key])
         if key in effective_multipliers:
             item["multiplier"] = float(effective_multipliers[key])
+        try:
+            from fizgig.training.web_policy import policy_for
+            policy = policy_for(policy_lookup, key)
+            item["training_policy"] = policy.get("training_policy", "automatic")
+            item["auto_recaption_policy"] = policy.get("auto_recaption_policy", "automatic")
+            if policy.get("training_policy") == "always_train":
+                item["multiplier"] = 1.0
+        except Exception:
+            pass
         images[str(key)] = item
     _append("loss_log/decision_history.jsonl", {
         "type": "loss_watch_epoch",
