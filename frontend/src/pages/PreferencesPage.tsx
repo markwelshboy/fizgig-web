@@ -29,6 +29,17 @@ type AppPreferences = Preferences & {
 
 type PreferenceTab = "vlm" | "models" | "tracking" | "paths" | "training" | "advanced";
 
+const QWEN_CAPTION_PRESETS = [
+  { value: "Qwen/Qwen3-VL-4B-Instruct", label: "Qwen3-VL 4B Instruct" },
+  { value: "Qwen/Qwen3-VL-8B-Instruct", label: "Qwen3-VL 8B Instruct" },
+  { value: "Qwen/Qwen3-VL-32B-Instruct", label: "Qwen3-VL 32B Instruct" },
+] as const;
+const CUSTOM_QWEN_PRESET = "__custom__";
+
+function qwenPresetValue(value: string) {
+  return QWEN_CAPTION_PRESETS.some((preset) => preset.value === value) ? value : CUSTOM_QWEN_PRESET;
+}
+
 const DEFAULTS: AppPreferences = {
   qwen_caption_model: "Qwen/Qwen3-VL-8B-Instruct",
   qwen_caption_processor: "",
@@ -234,11 +245,16 @@ export function PreferencesPage() {
             <p className="muted">Optional. Download a Hugging Face Qwen3-VL checkpoint into persistent workspace storage and select it as the caption VLM. A Hub ID can also be used directly without downloading here.</p>
           </div>
           <div className="preferences-download-grid">
+            <label>Qwen3-VL preset<select value={qwenPresetValue(downloadRepo)} onChange={(event) => { if (event.target.value !== CUSTOM_QWEN_PRESET) setDownloadRepo(event.target.value); }}>
+              {QWEN_CAPTION_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
+              <option value={CUSTOM_QWEN_PRESET}>Custom Hugging Face repository…</option>
+            </select></label>
             <label>Hugging Face repository<input value={downloadRepo} onChange={(event) => setDownloadRepo(event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct" /></label>
             <label>Revision <span className="muted">Optional</span><input value={downloadRevision} onChange={(event) => setDownloadRevision(event.target.value)} placeholder="main" /></label>
             <label>Destination<input value={prefs.caption_model_dir} onChange={(event) => patch("caption_model_dir", event.target.value)} /></label>
             <div className="preferences-download-action"><button className="primary" onClick={onDownloadQwen} disabled={operationBusy || !downloadRepo.trim()}>{qwenBusy ? "Downloading…" : "Download & Select"}</button></div>
           </div>
+          {downloadRepo === "Qwen/Qwen3-VL-32B-Instruct" && <div className="notice">Qwen3-VL 32B uses the same captioning path, but it is a much larger checkpoint. Make sure the pod has enough GPU/host memory before loading it.</div>}
         </section>
 
         <section className="panel stack">
@@ -246,11 +262,12 @@ export function PreferencesPage() {
             <div className="card-title">Caption VLM — Qwen3-VL</div>
             <p className="muted">This model only describes dataset images. It is independent of Krea 2 and Klein's training text encoders.</p>
           </div>
+          <label>Model preset<select value={qwenPresetValue(prefs.qwen_caption_model)} onChange={(event) => { if (event.target.value !== CUSTOM_QWEN_PRESET) patch("qwen_caption_model", event.target.value); }}>
+            {QWEN_CAPTION_PRESETS.map((preset) => <option key={preset.value} value={preset.value}>{preset.label}</option>)}
+            <option value={CUSTOM_QWEN_PRESET}>Custom model / local checkpoint…</option>
+          </select></label>
           <label>Active caption model / checkpoint<input value={prefs.qwen_caption_model} onChange={(event) => patch("qwen_caption_model", event.target.value)} placeholder="Qwen/Qwen3-VL-8B-Instruct or /workspace/models/captioning/..." /></label>
-          <div className="actions" style={{ justifyContent: "flex-start" }}>
-            <button className="secondary" type="button" onClick={() => patch("qwen_caption_model", "Qwen/Qwen3-VL-4B-Instruct")}>Use Qwen3-VL 4B Instruct</button>
-            <button className="secondary" type="button" onClick={() => patch("qwen_caption_model", "Qwen/Qwen3-VL-8B-Instruct")}>Use Qwen3-VL 8B Instruct</button>
-          </div>
+          {prefs.qwen_caption_model === "Qwen/Qwen3-VL-32B-Instruct" && <div className="notice">32B is selected. Saving Preferences unloads any currently loaded caption VLM; the 32B model will be loaded lazily on the next caption request.</div>}
         </section>
 
         <CaptionMethodologySettings />
