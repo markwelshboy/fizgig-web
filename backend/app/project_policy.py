@@ -35,9 +35,10 @@ class ProjectPolicyStore:
     """Project-owned caption/training intervention policy.
 
     Loss-watch verdicts remain observational truth. These settings only control what Fizgig is
-    allowed to DO in response to those verdicts. In particular, `always_train` must never rewrite
-    STUCK/EASY analytics; it means no automatic LR throttle, retirement, or exclusion for that
-    asset once the trainer integration consumes this sidecar.
+    allowed to DO in response to those verdicts. `automatic` deliberately means native upstream
+    behavior. `always_train` keeps the verdict/recommendation visible while forcing the applied
+    per-image multiplier to x1.0 and preventing automatic retirement/exclusion. Recaption Hold
+    and Never suppress the automatic repair path without blocking explicit/manual caption edits.
     """
 
     @staticmethod
@@ -152,9 +153,10 @@ class ProjectPolicyStore:
     def materialize_for_run(self, project_id: str, revision_id: str, run: dict[str, Any]) -> dict[str, Any]:
         """Freeze policy into both run provenance and the trainer dataset directory.
 
-        The trainer currently ignores this file; it is intentionally a stable hand-off contract for
-        the next integration pass. `run_policy.json` is immutable run provenance, while
-        `fizgig_asset_policy.json` travels next to the trainer materialized images.
+        `run_policy.json` is immutable run provenance. `fizgig_asset_policy.json` travels next to
+        the materialized trainer images and is consumed only by the fizgig-web loss-watch policy
+        overlay. A standalone Fizgig run has no sidecar and therefore retains native automatic
+        behavior for every asset.
         """
         policy = self.get(project_id, revision_id)
         manifest = project_store.get_revision(project_id, revision_id)
@@ -172,7 +174,8 @@ class ProjectPolicyStore:
             "caption_validation": policy["caption_validation"],
             "assets": resolved_assets,
             "semantics": {
-                "always_train": "Preserve analytic verdicts but prohibit automatic per-image throttle, retirement, or exclusion.",
+                "automatic": "Use native upstream Fizgig behavior for the enabled loss-watch feature.",
+                "always_train": "Preserve analytic verdicts/recommendations but force the applied per-image multiplier to x1.0 and prohibit automatic retirement/exclusion.",
                 "recaption_automatic": "Loss-watch may auto-recaption when normal Fizgig eligibility rules are met.",
                 "recaption_hold": "Temporarily suppress automatic recaption; manual and explicit user AI rewrites remain allowed.",
                 "recaption_never": "Never auto-recaption this asset for this policy snapshot.",
