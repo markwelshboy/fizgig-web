@@ -30,6 +30,10 @@ def main() -> None:
 
     destination = root / "src" / "fizgig" / "training" / "web_telemetry.py"
     shutil.copy2(module, destination)
+    policy_module = module.with_name("web_policy.py")
+    if not policy_module.is_file():
+        raise RuntimeError(f"Missing web policy overlay module: {policy_module}")
+    shutil.copy2(policy_module, root / "src" / "fizgig" / "training" / "web_policy.py")
 
     train_utils = root / "src" / "fizgig" / "training" / "train_utils.py"
     replace_once(
@@ -51,6 +55,78 @@ def main() -> None:
     )
 
     loss_logger = root / "src" / "fizgig" / "training" / "loss_logger.py"
+    replace_once(
+        loss_logger,
+        '        self.dataset_dir = dataset_dir\n'
+        '        self.caption_ext = caption_ext\n',
+        '        self.dataset_dir = dataset_dir\n'
+        '        self.caption_ext = caption_ext\n'
+        '        try:\n'
+        '            from fizgig.training.web_policy import load_asset_policy\n'
+        '            self._web_asset_policy = load_asset_policy(dataset_dir)\n'
+        '        except Exception:\n'
+        '            self._web_asset_policy = {}\n',
+    )
+    replace_once(
+        loss_logger,
+        '            else:\n'
+        '                self._excluded.add(str(key))\n'
+        '                self._incorrigible.add(str(key))\n',
+        '            else:\n'
+        '                if self.web_training_policy(key) != "always_train":\n'
+        '                    self._excluded.add(str(key))\n'
+        '                    self._incorrigible.add(str(key))\n',
+    )
+    replace_once(
+        loss_logger,
+        '    def set_warmup_keys(self, keys, *, start: float = 0.4, ramp_epochs: int = 4) -> None:\n',
+        '    def web_asset_policy(self, item_keys) -> dict:\n'
+        '        """Run-local fizgig-web policy for this trainer-visible asset key."""\n'
+        '        try:\n'
+        '            from fizgig.training.web_policy import policy_for\n'
+        '            return policy_for(getattr(self, "_web_asset_policy", {}), self._key_of(item_keys))\n'
+        '        except Exception:\n'
+        '            return {"training_policy": "automatic", "auto_recaption_policy": "automatic"}\n'
+        '\n'
+        '    def web_training_policy(self, item_keys) -> str:\n'
+        '        return str(self.web_asset_policy(item_keys).get("training_policy") or "automatic")\n'
+        '\n'
+        '    def web_allows_auto_recaption(self, item_keys) -> bool:\n'
+        '        return str(self.web_asset_policy(item_keys).get("auto_recaption_policy") or "automatic") == "automatic"\n'
+        '\n'
+        '    def set_warmup_keys(self, keys, *, start: float = 0.4, ramp_epochs: int = 4) -> None:\n',
+    )
+    replace_once(
+        loss_logger,
+        '        if self._batched:\n'
+        '            return 1.0\n'
+        '        key = self._key_of(item_keys)\n'
+        '        wm = self._warmup_mult(key)\n',
+        '        if self._batched:\n'
+        '            return 1.0\n'
+        '        key = self._key_of(item_keys)\n'
+        '        if self.web_training_policy(key) == "always_train":\n'
+        '            return 1.0\n'
+        '        wm = self._warmup_mult(key)\n',
+    )
+    replace_once(
+        loss_logger,
+        '        if self._batched:\n'
+        '            return False\n'
+        '        return self._key_of(item_keys) in self._excluded\n',
+        '        if self._batched:\n'
+        '            return False\n'
+        '        key = self._key_of(item_keys)\n'
+        '        if self.web_training_policy(key) == "always_train":\n'
+        '            return False\n'
+        '        return key in self._excluded\n',
+    )
+    replace_once(
+        loss_logger,
+        '                elif key in self._confirmed_stuck and key in self._incorrigible:\n',
+        '                elif (key in self._confirmed_stuck and key in self._incorrigible\n'
+        '                      and self.web_training_policy(key) != "always_train"):\n',
+    )
     replace_once(
         loss_logger,
         '            try:\n                d = os.path.join(self.output_dir, "loss_log")\n',
@@ -107,6 +183,19 @@ def main() -> None:
         '        self.prev_weight_norm = cur_wn\n',
     )
 
+    # The frozen web asset policy is keyed to trainer-visible filenames. Automatic is deliberately
+    # the no-op/default: with no sidecar, or with Auto/Auto, upstream Fizgig behavior is unchanged.
+    # Hold/Never suppress only the automatic candidate path; manual caption_updates.json still wins.
+    replace_once(
+        krea_trainer,
+        '            if k in updates or attempts >= 2:\n'
+        '                continue\n',
+        '            if k in updates or attempts >= 2:\n'
+        '                continue\n'
+        '            if loss_watch is not None and not loss_watch.web_allows_auto_recaption(k):\n'
+        '                continue\n',
+    )
+
     # Preview-only web extension: Fizgig standalone intentionally exposes one --sample_seed and
     # renders prompt i with seed+i. The web project model keeps explicit per-probe seeds. Read
     # those frozen configured_seed values from run.json only when the web telemetry environment
@@ -152,7 +241,7 @@ def main() -> None:
         '        p = os.path.join(out_dir, f"{output_name}_e{epoch:06d}_{i:02d}_{ts}_{_web_seed}.png")\n',
     )
 
-    print(f"Applied passive fizgig-web telemetry + preview overlay to {head}")
+    print(f"Applied fizgig-web telemetry + preview + intervention policy overlay to {head}")
 
 
 if __name__ == "__main__":
