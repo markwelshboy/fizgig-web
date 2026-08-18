@@ -5,3 +5,7 @@
 # the same source/derivative semantics and validated crop geometry.
 from . import image_prep_semantics as _image_prep_semantics  # noqa: F401,E402
 from . import prepared_derivative_semantics as _prepared_derivative_semantics  # noqa: F401,E402
+
+# Keep the pinned upstream trainer separate while allowing the web harness to map
+# immutable run configuration onto Fizgig's native loss-watch intervention flags.
+from . import training_intervention as _training_intervention  # noqa: F401,E402
