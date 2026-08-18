@@ -31,7 +31,7 @@ RUN python3 -m venv "$VIRTUAL_ENV"
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 ARG FIZGIG_REPO=https://github.com/shootthesound/Fizgig.git
-ARG FIZGIG_REF=6912b8aabb64600dd9da8702c5a04c8f867f7bc2
+ARG FIZGIG_REF=d8e881c339cf25cc03777e65a41e7005380cc8b0
 RUN git clone --filter=blob:none "$FIZGIG_REPO" /opt/Fizgig \
     && git -C /opt/Fizgig fetch --depth 1 origin "$FIZGIG_REF" \
     && git -C /opt/Fizgig checkout --detach FETCH_HEAD \
@@ -64,7 +64,7 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 FROM ubuntu:22.04 AS final
 
 ARG FIZGIG_REPO=https://github.com/shootthesound/Fizgig.git
-ARG FIZGIG_REF=6912b8aabb64600dd9da8702c5a04c8f867f7bc2
+ARG FIZGIG_REF=d8e881c339cf25cc03777e65a41e7005380cc8b0
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
