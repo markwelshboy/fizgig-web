@@ -30,7 +30,7 @@ Examples:
   ./build_fizgig-web.sh --tag test2
   ./build_fizgig-web.sh --load-test --tag local-test
   ./build_fizgig-web.sh --load --tag local-production-test
-  ./build_fizgig-web.sh --fizgig-ref 6912b8aabb64600dd9da8702c5a04c8f867f7bc2 --no-push
+  ./build_fizgig-web.sh --fizgig-ref d8e881c339cf25cc03777e65a41e7005380cc8b0 --no-push
 EOF
 }
 
@@ -45,7 +45,7 @@ LOAD=false
 LOAD_TEST=false
 NO_CACHE=false
 PRUNE_HARD=false
-FIZGIG_REF="6912b8aabb64600dd9da8702c5a04c8f867f7bc2"
+FIZGIG_REF="d8e881c339cf25cc03777e65a41e7005380cc8b0"
 FIZGIG_REPO="https://github.com/shootthesound/Fizgig.git"
 TEST_DOCKER_HOST="${DOCKER_TEST_HOST:-unix:///run/docker-test/docker.sock}"
 
