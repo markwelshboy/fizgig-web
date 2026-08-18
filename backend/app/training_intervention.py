@@ -8,13 +8,22 @@ from typing import Any
 from . import training_runtime as _runtime
 
 
+def _run_config(run: dict[str, Any]) -> dict[str, Any]:
+    value = run.get("config")
+    return value if isinstance(value, dict) else {}
+
+
 def _loss_watch_config(run: dict[str, Any]) -> dict[str, Any]:
-    config = run.get("config") if isinstance(run.get("config"), dict) else {}
-    value = config.get("loss_watch") if isinstance(config, dict) else {}
+    value = _run_config(run).get("loss_watch")
     return value if isinstance(value, dict) else {}
 
 
 def _intervention_mode(run: dict[str, Any]) -> str:
+    # Backward-compatibility boundary: older prepared runs may contain intervention-looking
+    # booleans from the former observer UI, where those values were provenance-only. Only a run
+    # prepared by the intervention-aware UI opts into changing training behavior.
+    if _run_config(run).get("training_mode") != "loss_watch_intervention":
+        return "observation_only"
     loss_watch = _loss_watch_config(run)
     active = any(
         bool(loss_watch.get(key))
@@ -30,6 +39,9 @@ def _append_option(argv: list[str], flag: str, value: str) -> None:
 
 def _commands(self: _runtime.TrainingRuntime, run: dict[str, Any], run_dir: Path) -> list[tuple[str, list[str]]]:
     commands = _ORIGINAL_COMMANDS(self, run, run_dir)
+    if _intervention_mode(run) != "loss_watch_intervention":
+        return commands
+
     loss_watch = _loss_watch_config(run)
     manifest = run.get("model_manifest") if isinstance(run.get("model_manifest"), dict) else {}
     model_paths = {
