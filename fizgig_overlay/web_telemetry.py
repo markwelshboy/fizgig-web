@@ -1,7 +1,8 @@
-"""Passive JSONL telemetry for the fizgig-web harness.
+"""Structured JSONL telemetry for the fizgig-web harness.
 
-This module is copied into the pinned upstream Fizgig tree at image build time. It is deliberately
-observation-only: no optimizer, loss, sampling, caption, or dataset state is changed here.
+This module is copied into the pinned upstream Fizgig tree at image build time. It records upstream
+training state and the effective response selected by the loss-watch/policy integration; it never
+changes optimizer, loss, sampling, caption, or dataset state itself.
 """
 from __future__ import annotations
 
@@ -82,19 +83,23 @@ def emit_adaptive_lr(*, epoch: int, loss: float, action: str, reason: str,
 def emit_decision_snapshot(*, epoch: int, stats: dict[str, dict[str, Any]],
                            improving_count: int, plateaued: bool,
                            pending_count: int, best_epoch_estimate: int | None,
-                           recommended_multipliers: dict[str, float] | None = None) -> None:
+                           recommended_multipliers: dict[str, float] | None = None,
+                           effective_multipliers: dict[str, float] | None = None) -> None:
     images: dict[str, dict[str, Any]] = {}
     keep = {
         "verdict", "multiplier", "mean_residual", "mean_loss", "slope", "first", "last", "se",
         "trend_epochs", "baseline", "total_drop", "epochs", "improving", "release_votes", "stuck_epochs",
     }
     recommended_multipliers = recommended_multipliers or {}
+    effective_multipliers = effective_multipliers or {}
     for key, state in stats.items():
         if "|" in str(key):
             continue
         item = {name: state[name] for name in keep if name in state}
         if key in recommended_multipliers:
             item["recommended_multiplier"] = float(recommended_multipliers[key])
+        if key in effective_multipliers:
+            item["multiplier"] = float(effective_multipliers[key])
         images[str(key)] = item
     _append("loss_log/decision_history.jsonl", {
         "type": "loss_watch_epoch",
