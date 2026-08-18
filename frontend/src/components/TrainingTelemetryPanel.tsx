@@ -465,18 +465,24 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
   const latestState = latestDecision?.images[selectedAsset];
   const latestRecommended = latestState ? decisionNumber(latestState, "recommended_multiplier") : null;
   const latestEffective = latestState ? decisionNumber(latestState, "multiplier") : null;
+  const lossWatchConfig = ((run.config?.loss_watch ?? {}) as Record<string, unknown>);
+  const interventionMode = run.telemetry_mode === "loss_watch_intervention"
+    || Boolean(lossWatchConfig.per_image_lr || lossWatchConfig.auto_recaption || lossWatchConfig.warmup_look_outliers);
 
   return <section className="panel stack training-telemetry-panel">
     <div className="training-section-heading">
-      <div><p className="eyebrow">Observer baseline</p><div className="card-title">Training Telemetry</div></div>
+      <div><p className="eyebrow">{interventionMode ? "Loss-watch intervention" : "Observation run"}</p><div className="card-title">Training Telemetry</div></div>
       <div className="training-telemetry-actions">
         <span className={`training-run-state ${run.status === "completed" ? "prepared" : "design"}`}>{run.status.toUpperCase()}</span>
-        {canStart && <button className="primary" disabled={starting} onClick={() => void onStart()}>{starting ? "Starting…" : "Start Baseline Training"}</button>}
+        {canStart && <button className="primary" disabled={starting} onClick={() => void onStart()}>{starting ? "Starting…" : "Start Training"}</button>}
         <button className="secondary" disabled={refreshing} onClick={() => void refresh()}>{refreshing ? "Refreshing…" : "Refresh"}</button>
       </div>
     </div>
 
-    <div className="training-baseline-note"><strong>Observation only.</strong> This run enables Fizgig's loss watcher so we can see its evidence and recommendations, but the web launcher does not enable per-image LR, auto-recaption, look-outlier warm-up, exclusions, or web policy overrides. This is the A/B baseline before we allow the harness to shape training.</div>
+    <div className="training-baseline-note">{interventionMode
+      ? <><strong>Intervention mode.</strong> Fizgig's loss watcher may apply the enabled per-image LR and/or automatic recaption actions. The frozen run policy can constrain individual assets with Always Train, Hold or Never while leaving the underlying verdict visible.</>
+      : <><strong>Observation mode.</strong> Per-image trajectories and recommendations are recorded, but no per-image LR or automatic recaption action is enabled for this run.</>}
+    </div>
 
     <div className="training-software-strip">
       <div><span>Upstream Fizgig</span><code title={upstreamSha}>{upstreamSha === "unknown" ? upstreamSha : upstreamSha.slice(0, 12)}</code></div>
@@ -503,7 +509,7 @@ export function TrainingTelemetryPanel({ projectId, run, onRunChange, onError }:
     {latestDecision && latestState && <div className="training-current-decision">
       <span>Latest selected-image decision</span>
       <strong>Epoch {latestDecision.epoch} · {latestState.verdict || "mid"}</strong>
-      <small>Fizgig recommendation ×{(latestRecommended ?? 1).toFixed(2)} · effective ×{(latestEffective ?? 1).toFixed(2)}. The baseline records the recommendation but does not apply it.</small>
+      <small>Fizgig recommendation ×{(latestRecommended ?? 1).toFixed(2)} · effective ×{(latestEffective ?? 1).toFixed(2)}. Recommended and effective values are kept separate so Auto and Always Train behavior can be compared directly.</small>
     </div>}
 
     <div className="training-telemetry-contract">
