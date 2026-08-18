@@ -127,6 +127,7 @@ export function TrainingPage() {
     trainingModelState?.fingerprinting
     || activeTrainingModels?.assets.some((asset) => asset.exists && !asset.verified && ["pending", "queued", "hashing"].includes(asset.hash_status)),
   );
+  const interventionsEnabled = perImageLr || autoRecaption || warmupLookOutliers;
   const runPatternValues = {
     project: project?.name || "project",
     model: activeModelFamily || "model",
@@ -300,6 +301,8 @@ export function TrainingPage() {
 
   const canPrepare = Boolean(project && revision && readiness.total > 0 && readiness.missing === 0 && trainingModelsReady && !preparing);
   const rewriteLadder = methodologies?.rewrite_ladder ?? [];
+  const nativeTrainingMethod = methodologyMap.get("builtin:training");
+  const nativeExhaustiveMethod = methodologyMap.get("builtin:exhaustive");
 
   async function onPrepareRun() {
     if (!project || !revision || !canPrepare) return;
@@ -314,7 +317,7 @@ export function TrainingPage() {
         config: {
           schema_version: 1,
           source: "fizgig-web-training-harness",
-          baseline_mode: "observation_only",
+          training_mode: interventionsEnabled ? "loss_watch_intervention" : "observation_only",
           reproducibility: {
             bucket_order: "seeded_per_epoch",
             rng_policy: "upstream_torch_global_seed",
@@ -370,8 +373,10 @@ export function TrainingPage() {
             per_image_lr: perImageLr,
             warmup_look_outliers: warmupLookOutliers,
             auto_recaption: autoRecaption,
+            recaption_instruction: nativeTrainingMethod?.instruction ?? "",
+            recaption_instruction_detailed: nativeExhaustiveMethod?.instruction ?? "",
             rewrite_ladder: rewriteLadder,
-            intervention_policy: "Observer baseline: analytic verdicts are recorded, while per-image LR, recaption, warm-up and web policy interventions remain disabled.",
+            intervention_policy: "Automatic assets follow upstream Fizgig loss-watch behavior. Always Train preserves verdicts but forces the applied per-image multiplier to x1.0 and prevents automatic exclusion/retirement. Hold and Never suppress automatic recaption for those assets.",
           },
           telemetry: {
             persistent_console_log: true,
@@ -406,9 +411,9 @@ export function TrainingPage() {
   return <div className="stack training-harness-page">
     <header className="page-header training-harness-header">
       <div>
-        <p className="eyebrow">Training harness · observer baseline</p>
+        <p className="eyebrow">Training harness · loss-watch interventions</p>
         <h1>Training</h1>
-        <p className="muted">Run the pinned upstream Fizgig trainer while surfacing its global loss, individual image trajectories and internal loss-watch decisions. For this baseline the harness observes but does not change per-image training behaviour.</p>
+        <p className="muted">Run the pinned upstream Fizgig trainer while surfacing global loss, individual image trajectories and loss-watch decisions. Per-image LR and automatic recaption are optional run controls; asset-level Auto, Always Train, Hold and Never policies are frozen when the run is prepared.</p>
       </div>
       <div className="training-header-badges">
         <span className="badge">{modelLabel(activeModelFamily)}</span>
@@ -449,10 +454,10 @@ export function TrainingPage() {
             {readiness.protectedWarnings > 0 && <span className="training-chip warning">{readiness.protectedWarnings} protected</span>}
             {readiness.alwaysTrain > 0 && <span className="training-chip">{readiness.alwaysTrain} Always Train</span>}
             {readiness.holdRecaption > 0 && <span className="training-chip">{readiness.holdRecaption} Hold</span>}
-            {readiness.lockRecaption > 0 && <span className="training-chip">{readiness.lockRecaption} Lock</span>}
-            {!readiness.spellingWarnings && !readiness.protectedWarnings && !readiness.alwaysTrain && !readiness.holdRecaption && !readiness.lockRecaption && <span className="muted">No interventions currently recorded</span>}
+            {readiness.lockRecaption > 0 && <span className="training-chip">{readiness.lockRecaption} Never</span>}
+            {!readiness.spellingWarnings && !readiness.protectedWarnings && !readiness.alwaysTrain && !readiness.holdRecaption && !readiness.lockRecaption && <span className="muted">All assets use Auto / Auto</span>}
           </div>
-          <small className="muted">Existing project intervention policy is snapshotted for provenance but deliberately not consumed by the baseline launcher.</small>
+          <small className="muted">Project intervention policy is frozen into the run. Auto assets follow upstream Fizgig; Always Train, Hold and Never constrain only the action Fizgig may take while keeping its analytic verdict visible.</small>
         </div>
       </div>
     </section>
@@ -475,7 +480,7 @@ export function TrainingPage() {
 
       <div className="training-subsection">
         <div className="training-subsection-title">Learning rate</div>
-        <label className="training-toggle"><input type="checkbox" checked={adaptiveLr} onChange={(event) => setAdaptiveLr(event.target.checked)} /> <span><strong>Adaptive LR</strong><small>This is standard Fizgig behaviour and remains available in the baseline. Its actual optimizer LR is recorded alongside loss so every adjustment is visible.</small></span></label>
+        <label className="training-toggle"><input type="checkbox" checked={adaptiveLr} onChange={(event) => setAdaptiveLr(event.target.checked)} /> <span><strong>Adaptive LR</strong><small>Standard Fizgig global LR control. Its actual optimizer LR is recorded alongside loss so every adjustment remains visible.</small></span></label>
         <div className="training-config-grid compact">
           {adaptiveLr ? <>
             <label>Min LR<input value={minLr} onChange={(event) => setMinLr(event.target.value)} /></label>
@@ -516,36 +521,39 @@ export function TrainingPage() {
     <section className="panel stack training-intelligence-panel">
       <div className="training-section-heading">
         <div><p className="eyebrow">Gate 3</p><div className="card-title">Dataset Intelligence</div></div>
-        <span className="badge">Observe first</span>
+        <span className="badge">{interventionsEnabled ? "Intervention enabled" : "Observation only"}</span>
       </div>
 
       <div className="training-policy-grid">
         <label className="training-policy-card selected">
           <input type="checkbox" checked={detectProblems} disabled readOnly />
-          <span><strong>Track individual losses</strong><small>Enabled for the baseline. Fizgig records each image's raw loss/timestep and computes its own normalized epoch-boundary trajectory and verdict.</small></span>
+          <span><strong>Track individual losses</strong><small>Always on for web training. Fizgig records each image's raw loss/timestep and computes its normalized epoch-boundary trajectory, verdict and recommended multiplier.</small></span>
         </label>
-        <label className="training-policy-card blocked">
-          <input type="checkbox" checked={perImageLr} disabled readOnly />
-          <span><strong>Per-image adaptive LR</strong><small>Deferred until the telemetry A/B is validated. Recommendations are surfaced, but this launcher does not apply the multiplier.</small></span>
+        <label className={`training-policy-card ${perImageLr ? "selected" : ""}`}>
+          <input type="checkbox" checked={perImageLr} onChange={(event) => setPerImageLr(event.target.checked)} />
+          <span><strong>Per-image adaptive LR</strong><small>Enable Fizgig's native per-image loss multiplier. Auto assets follow the upstream recommendation; Always Train assets keep the same analytic verdict but the applied multiplier stays x1.0 and they cannot be auto-excluded or retired.</small></span>
         </label>
         <label className="training-policy-card blocked">
           <input type="checkbox" checked={warmupLookOutliers} disabled readOnly />
-          <span><strong>Warm-up look outliers</strong><small>Deferred. No image-prep signal is allowed to shape this baseline.</small></span>
+          <span><strong>Warm-up look outliers</strong><small>Requires Fizgig Look Consistency Filter scores (<code>fizgig_look_scores.json</code>). Web Image Prep does not produce that signal yet, so this control remains unavailable.</small></span>
         </label>
-        <label className="training-policy-card blocked">
-          <input type="checkbox" checked={autoRecaption} disabled readOnly />
-          <span><strong>Automatic caption resolution</strong><small>Deferred. Fizgig can still identify stuck images, but the baseline will not rewrite captions or re-encode text during training.</small></span>
+        <label className={`training-policy-card ${autoRecaption ? "selected" : ""}`}>
+          <input type="checkbox" checked={autoRecaption} onChange={(event) => setAutoRecaption(event.target.checked)} />
+          <span><strong>Automatic caption resolution</strong><small>Enable Fizgig's native stuck-image recaption path. Auto assets are eligible; Hold and Never suppress automatic rewrites for that asset. In-run fixes change only the materialized run dataset, not the canonical project caption.</small></span>
         </label>
       </div>
 
-      <div className="training-rewrite-ladder baseline-disabled">
-        <div><strong>Rewrite ladder · frozen but inactive</strong><button className="secondary" type="button" onClick={() => navigate("/preferences#caption-methodologies")}>Inspect</button></div>
-        <div className="training-chip-row">{rewriteLadder.length ? rewriteLadder.map((id, index) => <span className="training-chip" key={`${id}-${index}`}>Stage {index + 1} · {methodologyMap.get(id)?.name ?? id}</span>) : <span className="muted">Loading caption methodologies…</span>}</div>
-        <small className="muted">Definitions remain in the run provenance so a later intervention-enabled run can be compared exactly, but no stage is invoked here.</small>
+      <div className="training-rewrite-ladder">
+        <div><strong>Automatic recaption path</strong><button className="secondary" type="button" onClick={() => navigate("/preferences#caption-methodologies")}>Inspect methodologies</button></div>
+        <div className="training-chip-row">
+          <span className="training-chip">Attempt 1 · {nativeTrainingMethod?.name ?? "Training caption"}</span>
+          <span className="training-chip">Attempt 2 · {nativeExhaustiveMethod?.name ?? "Exhaustive detail"}</span>
+        </div>
+        <small className="muted">This test uses Fizgig's native two-attempt Krea repair path and its in-training Qwen3-VL text encoder, not the separate Preferences caption VLM. The broader web rewrite ladder remains recorded in run provenance for later custom intervention work.</small>
       </div>
 
       <div className="training-principle-note">
-        <strong>Baseline rule:</strong> Fizgig may measure and classify. The web harness does not change an individual image's LR, caption, inclusion, or warm-up state until the observational A/B is clean.
+        <strong>Policy rule:</strong> loss-watch verdicts remain the analytic evidence. Auto permits the upstream response; Always Train constrains training response to full strength; Hold/Never constrain automatic recaption. The policy is frozen at Prepare so comparison runs remain reproducible.
       </div>
     </section>
 
@@ -567,7 +575,7 @@ export function TrainingPage() {
         <div><span>Images</span><strong>{readiness.total}</strong></div>
         <div><span>Trigger</span><strong>{activeTrigger || "—"}</strong></div>
         <div><span>Model identity</span><strong>{trainingModelsReady ? "SHA-256 verified" : trainingFilesReady ? "Hashing…" : "Not ready"}</strong></div>
-        <div><span>Telemetry mode</span><strong>Observer only</strong></div>
+        <div><span>Loss-watch mode</span><strong>{interventionsEnabled ? "Intervention" : "Observation only"}</strong></div>
       </div>
       <div className="actions"><button className="secondary" onClick={() => navigate("/samples")}>Back to Sampling</button><button className="primary" onClick={onPrepareRun} disabled={!canPrepare}>{preparing ? "Preparing…" : "Prepare Training Run"}</button></div>
     </section>
@@ -582,18 +590,18 @@ export function TrainingPage() {
         <div><span>Materialized trainer dataset</span><code>{run.dataset_path}</code></div>
         {trackingEnabled && <div><span>W&B run name</span><code>{wandbRunPreview}</code></div>}
       </div>
-      <p className="muted">The dataset, model SHA-256 manifest and configuration snapshot are project-owned. The trainer is launched as a separate explicit action below; its console, metrics and decision stream stay with this run.</p>
+      <p className="muted">The dataset, model SHA-256 manifest, intervention policy and configuration snapshot are project-owned. The trainer is launched as a separate explicit action below; its console, metrics and decision stream stay with this run.</p>
     </section>}
 
     {run ? <TrainingTelemetryPanel projectId={project.id} run={run} onRunChange={syncRun} onError={setError} /> : <section className="panel stack training-telemetry-panel">
       <div className="training-section-heading">
-        <div><p className="eyebrow">Observer baseline</p><div className="card-title">Training Telemetry</div></div>
+        <div><p className="eyebrow">Training telemetry</p><div className="card-title">Training Telemetry</div></div>
         <span className="muted">Prepare a run first</span>
       </div>
       <div className="training-telemetry-grid">
         <div><strong>Global training</strong><code>metrics.jsonl</code><small>loss, moving average, optimizer LR, timestep and asset context</small></div>
         <div><strong>Per-image loss</strong><code>loss_log/per_image_loss.jsonl</code><small>asset identity, raw loss, timestep bucket and residual</small></div>
-        <div><strong>Epoch decisions</strong><code>loss_log/decision_history.jsonl</code><small>normalized trajectory, verdict, multiplier recommendation and plateau state</small></div>
+        <div><strong>Epoch decisions</strong><code>loss_log/decision_history.jsonl</code><small>normalized trajectory, verdict, recommended multiplier and plateau state</small></div>
         <div><strong>Audit trail</strong><code>events.jsonl + console.log</code><small>command lifecycle and timestamped stdout/stderr</small></div>
       </div>
     </section>}
