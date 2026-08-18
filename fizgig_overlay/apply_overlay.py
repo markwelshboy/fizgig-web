@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-EXPECTED_BASELINE = "6912b8aabb64600dd9da8702c5a04c8f867f7bc2"
+EXPECTED_BASELINE = "d8e881c339cf25cc03777e65a41e7005380cc8b0"
 
 
 def replace_once(path: Path, old: str, new: str) -> None:
