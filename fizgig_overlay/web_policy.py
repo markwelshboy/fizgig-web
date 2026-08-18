@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any
 
+logger = logging.getLogger(__name__)
+_REPORTED: set[tuple[str, str, str]] = set()
 _DEFAULT = {
     "training_policy": "automatic",
     "auto_recaption_policy": "automatic",
@@ -45,6 +48,7 @@ def load_asset_policy(dataset_dir: str | None) -> dict[str, dict[str, Any]]:
                 entry["auto_recaption_policy"] = value["auto_recaption_policy"]
             if value.get("project_filename"):
                 entry["project_filename"] = str(value["project_filename"])
+        entry["trainer_filename"] = str(filename)
         for alias in _aliases(str(filename)):
             lookup[alias] = entry
     return lookup
@@ -56,5 +60,16 @@ def policy_for(lookup: dict[str, dict[str, Any]] | None, item_key: Any) -> dict[
     for alias in _aliases(str(item_key or "")):
         value = lookup.get(alias)
         if isinstance(value, dict):
-            return {**_DEFAULT, **value}
+            result = {**_DEFAULT, **value}
+            training = str(result.get("training_policy") or "automatic")
+            recaption = str(result.get("auto_recaption_policy") or "automatic")
+            if training != "automatic" or recaption != "automatic":
+                report_key = (str(result.get("trainer_filename") or alias), training, recaption)
+                if report_key not in _REPORTED:
+                    _REPORTED.add(report_key)
+                    logger.info(
+                        "[web-policy] %s: training=%s auto_recaption=%s",
+                        report_key[0], training, recaption,
+                    )
+            return result
     return dict(_DEFAULT)
