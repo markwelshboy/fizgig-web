@@ -45,6 +45,26 @@ type AssetBinding = {
   trainingFilename: string;
 };
 
+type FrozenAsset = {
+  filename?: string;
+  project_filename?: string;
+  training_filename?: string;
+  image_sha256?: string;
+  caption?: string;
+  caption_sha256?: string;
+};
+
+type FrozenPolicy = {
+  training_policy?: string;
+  auto_recaption_policy?: string;
+};
+
+type ComparisonTelemetry = TrainingTelemetry & {
+  dataset_snapshot?: { assets?: FrozenAsset[] } | null;
+  run_policy?: { assets?: Record<string, FrozenPolicy> } | null;
+  caption_updates_applied?: Record<string, unknown> | null;
+};
+
 const VIEW_W = 1000;
 const VIEW_H = 270;
 const PAD_X = 58;
@@ -52,6 +72,10 @@ const PAD_Y = 28;
 
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function comparisonTelemetry(value: TrainingTelemetry) {
+  return value as ComparisonTelemetry;
 }
 
 function finite(value: unknown): value is number {
@@ -143,6 +167,46 @@ function configDifferences(a: RunInfo, b: RunInfo) {
   return [...new Set([...Object.keys(left), ...Object.keys(right)])]
     .sort()
     .flatMap((path) => left[path] === right[path] ? [] : [{ path, a: left[path] ?? "<unset>", b: right[path] ?? "<unset>" }]);
+}
+
+function frozenAssets(telemetry: TrainingTelemetry) {
+  const assets = comparisonTelemetry(telemetry).dataset_snapshot?.assets;
+  return Array.isArray(assets) ? assets : [];
+}
+
+function canonicalAssetName(asset: FrozenAsset) {
+  return String(asset.project_filename || asset.filename || asset.training_filename || "");
+}
+
+function frozenAssetMap(telemetry: TrainingTelemetry) {
+  return new Map(frozenAssets(telemetry).filter((asset) => canonicalAssetName(asset)).map((asset) => [canonicalAssetName(asset), asset]));
+}
+
+function snapshotSignature(telemetry: TrainingTelemetry, field: "image_sha256" | "caption_sha256") {
+  const rows = frozenAssets(telemetry);
+  if (!rows.length) return "";
+  return rows
+    .map((asset) => `${canonicalAssetName(asset)}:${String(asset[field] || "")}`)
+    .sort()
+    .join("|");
+}
+
+function frozenPolicy(telemetry: TrainingTelemetry, canonical: string): FrozenPolicy {
+  const policies = comparisonTelemetry(telemetry).run_policy?.assets ?? {};
+  return policies[canonical] ?? { training_policy: "automatic", auto_recaption_policy: "automatic" };
+}
+
+function captionUpdateCount(telemetry: TrainingTelemetry, binding: AssetBinding | undefined, canonical: string) {
+  const updates = comparisonTelemetry(telemetry).caption_updates_applied;
+  if (!updates) return 0;
+  const trainingName = binding?.trainingFilename || "";
+  const aliases = [binding?.key || "", trainingName, trainingName.replace(/\.[^.]+$/, ""), canonical, canonical.replace(/\.[^.]+$/, "")].filter(Boolean);
+  for (const alias of aliases) {
+    const value = updates[alias];
+    if (Array.isArray(value)) return value.length;
+    if (value && typeof value === "object") return 1;
+  }
+  return 0;
 }
 
 function globalLossSeries(telemetry: TrainingTelemetry): PlotPoint[] {
@@ -387,6 +451,12 @@ export function RunComparisonPanel({ projectId, runIds, onClose }: Props) {
     const scheduleB = scheduleValue(b.run, "image_order_sha256");
     const timestepA = scheduleValue(a.run, "image_timestep_schedule_sha256");
     const timestepB = scheduleValue(b.run, "image_timestep_schedule_sha256");
+    const imageSignatureA = snapshotSignature(a.telemetry, "image_sha256");
+    const imageSignatureB = snapshotSignature(b.telemetry, "image_sha256");
+    const captionSignatureA = snapshotSignature(a.telemetry, "caption_sha256");
+    const captionSignatureB = snapshotSignature(b.telemetry, "caption_sha256");
+    const frozenA = frozenAssetMap(a.telemetry);
+    const frozenB = frozenAssetMap(b.telemetry);
     const sampleMapA = new Map(a.telemetry.samples.map((sample) => [sampleKey(sample), sample]));
     const sampleMapB = new Map(b.telemetry.samples.map((sample) => [sampleKey(sample), sample]));
     const sampleKeys = [...new Set([...sampleMapA.keys(), ...sampleMapB.keys()])].sort((left, right) => {
@@ -394,7 +464,7 @@ export function RunComparisonPanel({ projectId, runIds, onClose }: Props) {
       const [re, rp] = right.split(":").map(Number);
       return le - re || lp - rp;
     });
-    return { a, b, bindingsA, bindingsB, assets, differences, globalA, globalB, scheduleA, scheduleB, timestepA, timestepB, sampleMapA, sampleMapB, sampleKeys };
+    return { a, b, bindingsA, bindingsB, assets, differences, globalA, globalB, scheduleA, scheduleB, timestepA, timestepB, imageSignatureA, imageSignatureB, captionSignatureA, captionSignatureB, frozenA, frozenB, sampleMapA, sampleMapB, sampleKeys };
   }, [loaded]);
 
   useEffect(() => {
@@ -411,11 +481,19 @@ export function RunComparisonPanel({ projectId, runIds, onClose }: Props) {
   const { a, b } = comparison;
   const bindingA = comparison.bindingsA.get(selectedAsset);
   const bindingB = comparison.bindingsB.get(selectedAsset);
+  const frozenA = comparison.frozenA.get(selectedAsset);
+  const frozenB = comparison.frozenB.get(selectedAsset);
   const imageSeriesA = decisionSeries(a.telemetry, bindingA?.key);
   const imageSeriesB = decisionSeries(b.telemetry, bindingB?.key);
   const latestA = latestDecision(a.telemetry, bindingA?.key);
   const latestB = latestDecision(b.telemetry, bindingB?.key);
+  const policyA = frozenPolicy(a.telemetry, selectedAsset);
+  const policyB = frozenPolicy(b.telemetry, selectedAsset);
+  const recaptionCountA = captionUpdateCount(a.telemetry, bindingA, selectedAsset);
+  const recaptionCountB = captionUpdateCount(b.telemetry, bindingB, selectedAsset);
   const modelStatus = compareStatus(modelSignature(a.run), modelSignature(b.run));
+  const imageStatus = compareStatus(comparison.imageSignatureA, comparison.imageSignatureB, "Unavailable");
+  const captionStatus = compareStatus(comparison.captionSignatureA, comparison.captionSignatureB, "Unavailable");
   const upstreamStatus = compareStatus(softwareValue(a.run, "fizgig", "commit"), softwareValue(b.run, "fizgig", "commit"));
   const webStatus = compareStatus(softwareValue(a.run, "fizgig_web", "vcs_ref"), softwareValue(b.run, "fizgig_web", "vcs_ref"));
   const scheduleStatus = compareStatus(comparison.scheduleA, comparison.scheduleB, "Pending / unavailable");
@@ -441,9 +519,11 @@ export function RunComparisonPanel({ projectId, runIds, onClose }: Props) {
     </div>
 
     <div className="run-compare-subsection">
-      <div className="run-compare-subheading"><div><strong>Comparability contract</strong><small>Green rows are identical; differences stay visible rather than being normalized away.</small></div><span>{comparison.differences.length} config difference{comparison.differences.length === 1 ? "" : "s"}</span></div>
+      <div className="run-compare-subheading"><div><strong>Comparability contract</strong><small>Frozen run snapshots are compared directly. Green rows are identical; differences stay visible rather than being normalized away.</small></div><span>{comparison.differences.length} config difference{comparison.differences.length === 1 ? "" : "s"}</span></div>
       <div className="run-compare-contract">
         <div><span>Dataset revision</span><strong>{a.run.dataset_revision}</strong><strong>{b.run.dataset_revision}</strong><b className={datasetStatus.className}>{datasetStatus.label}</b></div>
+        <div><span>Starting image bytes</span><strong>{comparison.imageSignatureA ? `${frozenAssets(a.telemetry).length} assets` : "—"}</strong><strong>{comparison.imageSignatureB ? `${frozenAssets(b.telemetry).length} assets` : "—"}</strong><b className={imageStatus.className}>{imageStatus.label}</b></div>
+        <div><span>Starting captions</span><strong>{comparison.captionSignatureA ? `${frozenAssets(a.telemetry).length} captions` : "—"}</strong><strong>{comparison.captionSignatureB ? `${frozenAssets(b.telemetry).length} captions` : "—"}</strong><b className={captionStatus.className}>{captionStatus.label}</b></div>
         <div><span>Training seed</span><strong>{seedA}</strong><strong>{seedB}</strong><b className={seedStatus.className}>{seedStatus.label}</b></div>
         <div><span>Base model SHA set</span><strong>{modelSignature(a.run) ? "Fingerprint set" : "Unknown"}</strong><strong>{modelSignature(b.run) ? "Fingerprint set" : "Unknown"}</strong><b className={modelStatus.className}>{modelStatus.label}</b></div>
         <div><span>Upstream Fizgig</span><strong>{shortSha(softwareValue(a.run, "fizgig", "commit"))}</strong><strong>{shortSha(softwareValue(b.run, "fizgig", "commit"))}</strong><b className={upstreamStatus.className}>{upstreamStatus.label}</b></div>
@@ -494,6 +574,10 @@ export function RunComparisonPanel({ projectId, runIds, onClose }: Props) {
       <div className="run-compare-decision-cards">
         <div className="run-a"><span>Run A latest</span><strong>{latestA ? `Epoch ${latestA.epoch} · ${latestA.state.verdict || "mid"}` : "No decision"}</strong><small>recommended ×{(stateNumber(latestA?.state, "recommended_multiplier") ?? 1).toFixed(2)} · effective ×{(stateNumber(latestA?.state, "multiplier") ?? 1).toFixed(2)}</small></div>
         <div className="run-b"><span>Run B latest</span><strong>{latestB ? `Epoch ${latestB.epoch} · ${latestB.state.verdict || "mid"}` : "No decision"}</strong><small>recommended ×{(stateNumber(latestB?.state, "recommended_multiplier") ?? 1).toFixed(2)} · effective ×{(stateNumber(latestB?.state, "multiplier") ?? 1).toFixed(2)}</small></div>
+      </div>
+      <div className="run-compare-caption-cards">
+        <div className="run-a"><div><span>Frozen starting caption</span><small>training {policyA.training_policy || "automatic"} · recaption {policyA.auto_recaption_policy || "automatic"} · {recaptionCountA} applied auto-fix{recaptionCountA === 1 ? "" : "es"}</small></div><p>{frozenA?.caption || "No frozen caption available for this asset."}</p></div>
+        <div className="run-b"><div><span>Frozen starting caption</span><small>training {policyB.training_policy || "automatic"} · recaption {policyB.auto_recaption_policy || "automatic"} · {recaptionCountB} applied auto-fix{recaptionCountB === 1 ? "" : "es"}</small></div><p>{frozenB?.caption || "No frozen caption available for this asset."}</p></div>
       </div>
     </div>
 
