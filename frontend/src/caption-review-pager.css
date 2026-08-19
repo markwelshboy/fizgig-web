@@ -1,0 +1,35 @@
+.caption-review-position {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.caption-review-position > span {
+  min-width: 46px;
+  text-align: center;
+}
+
+.caption-review-arrow {
+  width: 30px;
+  height: 30px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: #0b1626;
+  color: #e2e8f0;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.caption-review-arrow:hover:not(:disabled) {
+  border-color: #8b5cf6;
+  background: rgba(91, 33, 182, .18);
+  color: #fff;
+}
+
+.caption-review-arrow:disabled {
+  opacity: .35;
+  cursor: default;
+}

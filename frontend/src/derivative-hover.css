@@ -1,0 +1,16 @@
+/* Keep derivative cards consistent with source cards: cropped/cover by default, full/contain on hover. */
+.derivative-grid .prep-image-wrap img,
+.derivative-card-shell .prep-image-wrap img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover !important;
+  object-position: center;
+  background: #06101c;
+}
+
+.derivative-grid .prep-image-card:hover .prep-image-wrap img,
+.derivative-card-shell:hover .prep-image-wrap img {
+  object-fit: contain !important;
+  object-position: center;
+  background: #06101c;
+}

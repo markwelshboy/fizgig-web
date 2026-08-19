@@ -1,0 +1,158 @@
+.exception-semantics-banner {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid #2b3d57;
+  border-radius: 10px;
+  background: #0a1422;
+  color: #91a4bd;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.exception-semantics-banner strong { color: #eef3ff; }
+.exception-semantics-banner .baked { color: #c4a7ff; }
+
+/* Exception controls: label, value, then the slider row. Keeping the value on
+   its own line avoids collisions with the +/- micro controls at any width. */
+#per-image-v4 .inline-editor-controls .tuning-grid {
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 26px 34px;
+  margin-top: 10px;
+}
+#per-image-v4 .inline-editor-controls .tuning-slider {
+  display: grid;
+  grid-template-rows: auto auto;
+  gap: 8px;
+  min-width: 0;
+}
+#per-image-v4 .inline-editor-controls .slider-title {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 3px;
+  min-height: 34px;
+  padding: 0 2px;
+  align-content: start;
+}
+#per-image-v4 .inline-editor-controls .slider-title > span {
+  display: block;
+}
+#per-image-v4 .inline-editor-controls .slider-title strong {
+  display: block;
+  justify-self: start;
+  min-width: 58px;
+  padding: 2px 7px;
+  border: 1px solid #2d415c;
+  border-radius: 6px;
+  background: #0a1625;
+  color: #edf3ff;
+  text-align: center;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+#per-image-v4 .inline-editor-controls .slider-row {
+  display: grid;
+  grid-template-columns: 34px minmax(150px, 1fr) 34px;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+#per-image-v4 .inline-editor-controls .slider-row input[type="range"] {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+}
+#per-image-v4 .inline-editor-controls .micro-button {
+  width: 34px;
+  height: 30px;
+}
+
+/* Contextual reset wording, presentation-only; no DOM mutation/observer. */
+#per-image-v4 .inline-editor-controls .actions > button.secondary:not(.danger) {
+  min-width: 132px;
+  position: relative;
+  color: transparent;
+}
+#per-image-v4 .inline-editor-controls .actions > button.secondary:not(.danger)::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 0 10px;
+  color: #e8eef9;
+  content: "Reset to global";
+  white-space: nowrap;
+}
+#per-image-v4 .inline-editor-controls:has(button.danger.secondary) .actions > button.secondary:not(.danger)::after {
+  content: "Reset adjustment";
+}
+#per-image-v4 .inline-editor-controls .actions:has(button.primary:disabled) > button.secondary:not(.danger) {
+  opacity: .48;
+  pointer-events: none;
+}
+
+/* Stage 5 heading: title/description, then a right-aligned one-line overview,
+   then the inheritance explanation. */
+#per-image-v4 > .prep-section-heading {
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 8px;
+}
+#per-image-v4 > .prep-section-heading > .muted {
+  grid-column: 1 / -1;
+  justify-self: end;
+  text-align: right;
+  color: #f7f9ff;
+  font-weight: 650;
+  white-space: nowrap;
+  line-height: 1.3;
+  margin: 0;
+}
+
+/* Keep the inheritance model visible without injecting or rewriting DOM nodes. */
+#per-image-v4 > .prep-section-heading::after {
+  content: "Base Project Assets inherit the saved global preparation recipe. Derivatives already contain the preparation active when they were created; their controls add further adjustments on top of those baked pixels.";
+  grid-column: 1 / -1;
+  margin-top: 0;
+  padding: 9px 11px;
+  border: 1px solid #2b3d57;
+  border-radius: 9px;
+  background: #0a1422;
+  color: #91a4bd;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+/* Keep every Stage 5 card the same height even when only some cards have an
+   override-summary line. The explicit third metadata row becomes the placeholder. */
+#per-image-v4 .processed-grid .prep-image-meta {
+  display: grid;
+  grid-template-rows: auto auto 18px;
+  align-content: start;
+  min-height: 62px;
+}
+#per-image-v4 .processed-grid .transform-state-line {
+  min-height: 18px;
+  align-items: center;
+}
+
+/* Terminology cleanup in the final review ledger. */
+.dataset-final-summary .summary-ledger > div:nth-child(2) > span,
+.dataset-final-summary .summary-ledger > div:nth-child(3) > span {
+  font-size: 0;
+}
+.dataset-final-summary .summary-ledger > div:nth-child(2) > span::before {
+  content: "Global preparation recipe";
+  font-size: 14px;
+}
+.dataset-final-summary .summary-ledger > div:nth-child(3) > span::before {
+  content: "Base asset exceptions";
+  font-size: 14px;
+}
+
+@media (max-width: 1050px) {
+  #per-image-v4 .inline-editor-controls .tuning-grid {
+    grid-template-columns: 1fr;
+  }
+  #per-image-v4 > .prep-section-heading > .muted {
+    white-space: normal;
+  }
+}

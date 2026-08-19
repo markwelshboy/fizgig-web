@@ -1,0 +1,80 @@
+import type { CaptionGenerateRequest } from "./api";
+import { beginLocalActivity, notifyRuntime } from "./activity-api";
+import { getCaptionRuntimeStatus } from "./caption-runtime-api";
+import type { CaptionMethodology } from "./caption-methodologies-api";
+
+export type ProjectCaptionGenerateRequest = CaptionGenerateRequest & {
+  methodology_id?: string;
+  use_project_template?: boolean;
+};
+
+export type ProjectCaptionGenerateResult = {
+  filename: string;
+  caption: string;
+  saved: false;
+  provider: string;
+  prepared_asset: true;
+  methodology?: (CaptionMethodology & {
+    methodology_id?: string;
+    methodology_name?: string;
+    variables?: Record<string, string>;
+    rendered_instruction?: string;
+  }) | Record<string, unknown> | null;
+  validation?: { valid: boolean; errors: string[]; warnings: string[] } | null;
+  attempts?: number;
+};
+
+async function api<T>(url: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(url, {
+    headers: { "Content-Type": "application/json", ...(init?.headers || {}) },
+    ...init,
+  });
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const body = await response.json();
+      if (body?.detail) detail = body.detail;
+    } catch {}
+    throw new Error(detail);
+  }
+  return response.json() as Promise<T>;
+}
+
+function providerLabel(provider: string) {
+  return provider === "florence" ? "Florence-2" : "Qwen3-VL";
+}
+
+export function preparedProjectAssetUrl(projectId: string, revisionId: string, filename: string) {
+  return `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/prep/assets/${encodeURIComponent(filename)}/prepared-preview`;
+}
+
+export async function generateProjectAssetCaption(
+  projectId: string,
+  revisionId: string,
+  filename: string,
+  request: ProjectCaptionGenerateRequest,
+) {
+  let needsLoad = false;
+  try {
+    const runtime = await getCaptionRuntimeStatus();
+    needsLoad = !runtime.loaded.includes(request.provider as "qwen" | "florence");
+  } catch {
+    // Runtime status is advisory; generation itself remains the source of truth.
+  }
+
+  const label = providerLabel(request.provider);
+  if (needsLoad) notifyRuntime(`${label} is not loaded. Downloading/loading the model now…`, "info");
+  const endActivity = beginLocalActivity("Captioning", needsLoad ? `Downloading/loading ${label}` : `Generating caption · ${filename}`);
+  try {
+    const result = await api<ProjectCaptionGenerateResult>(
+      `/api/projects/${encodeURIComponent(projectId)}/revisions/${encodeURIComponent(revisionId)}/captions/${encodeURIComponent(filename)}/generate`,
+      { method: "POST", body: JSON.stringify(request) },
+    );
+    if (request.provider === "qwen" && (result.attempts ?? 1) > 1) {
+      notifyRuntime(`Caption methodology validation passed on attempt ${result.attempts}.`, "info");
+    }
+    return result;
+  } finally {
+    endActivity();
+  }
+}

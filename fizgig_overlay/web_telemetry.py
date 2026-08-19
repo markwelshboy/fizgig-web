@@ -1,0 +1,130 @@
+"""Structured JSONL telemetry for the fizgig-web harness.
+
+This module is copied into the pinned upstream Fizgig tree at image build time. It records upstream
+training state and the effective response selected by the loss-watch/policy integration; it never
+changes optimizer, loss, sampling, caption, or dataset state itself.
+"""
+from __future__ import annotations
+
+import json
+import os
+import threading
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any
+
+_LOCK = threading.Lock()
+
+
+def _root() -> Path | None:
+    raw = os.environ.get("FIZGIG_TELEMETRY_DIR", "").strip()
+    return Path(raw).expanduser() if raw else None
+
+
+def _append(relative: str, value: dict[str, Any]) -> None:
+    root = _root()
+    if root is None:
+        return
+    path = root / relative
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n"
+        with _LOCK:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line)
+                f.flush()
+    except Exception:
+        # Telemetry must never be able to break a training run.
+        return
+
+
+def emit_metric(*, epoch: int, step: int, loss: float, moving_average: float) -> None:
+    _append("metrics.jsonl", {
+        "type": "loss",
+        "epoch": int(epoch) + 1,
+        "step_in_epoch": int(step),
+        "loss": float(loss),
+        "loss_moving_average": float(moving_average),
+    })
+
+
+def emit_step_context(*, epoch: int, step_in_epoch: int, global_step: int, lr: float, timestep: float,
+                      item_keys: Any, loss_multiplier: float) -> None:
+    keys = item_keys if isinstance(item_keys, (list, tuple)) else [item_keys]
+    keys = [str(key) for key in keys if key is not None]
+    _append("metrics.jsonl", {
+        "type": "step_context",
+        "epoch": int(epoch),
+        "step_in_epoch": int(step_in_epoch),
+        "global_step": int(global_step),
+        "lr": float(lr),
+        "timestep": float(timestep),
+        "asset": keys[0] if len(keys) == 1 else "|".join(keys),
+        "loss_multiplier": float(loss_multiplier),
+    })
+
+
+def emit_adaptive_lr(*, epoch: int, loss: float, action: str, reason: str,
+                     before_lr: float, after_lr: float, weight_growth: float | None) -> None:
+    _append("events.jsonl", {
+        "time": datetime.now(timezone.utc).isoformat(),
+        "type": "adaptive_lr_decision",
+        "epoch": int(epoch),
+        "loss": float(loss),
+        "action": str(action),
+        "reason": str(reason),
+        "before_lr": float(before_lr),
+        "after_lr": float(after_lr),
+        "weight_growth": float(weight_growth) if weight_growth is not None else None,
+        "changed": float(before_lr) != float(after_lr),
+    })
+
+
+def emit_decision_snapshot(*, epoch: int, stats: dict[str, dict[str, Any]],
+                           improving_count: int, plateaued: bool,
+                           pending_count: int, best_epoch_estimate: int | None,
+                           recommended_multipliers: dict[str, float] | None = None,
+                           effective_multipliers: dict[str, float] | None = None) -> None:
+    images: dict[str, dict[str, Any]] = {}
+    keep = {
+        "verdict", "multiplier", "mean_residual", "mean_loss", "slope", "first", "last", "se",
+        "trend_epochs", "baseline", "total_drop", "epochs", "improving", "release_votes", "stuck_epochs",
+    }
+    recommended_multipliers = recommended_multipliers or {}
+    effective_multipliers = effective_multipliers or {}
+    policy_lookup: dict[str, dict[str, Any]] = {}
+    try:
+        root = _root()
+        if root is not None:
+            from fizgig.training.web_policy import load_asset_policy
+            policy_lookup = load_asset_policy(str(root / "dataset"))
+    except Exception:
+        policy_lookup = {}
+
+    for key, state in stats.items():
+        if "|" in str(key):
+            continue
+        item = {name: state[name] for name in keep if name in state}
+        if key in recommended_multipliers:
+            item["recommended_multiplier"] = float(recommended_multipliers[key])
+        if key in effective_multipliers:
+            item["multiplier"] = float(effective_multipliers[key])
+        try:
+            from fizgig.training.web_policy import policy_for
+            policy = policy_for(policy_lookup, key)
+            item["training_policy"] = policy.get("training_policy", "automatic")
+            item["auto_recaption_policy"] = policy.get("auto_recaption_policy", "automatic")
+            if policy.get("training_policy") == "always_train":
+                item["multiplier"] = 1.0
+        except Exception:
+            pass
+        images[str(key)] = item
+    _append("loss_log/decision_history.jsonl", {
+        "type": "loss_watch_epoch",
+        "epoch": int(epoch),
+        "improving_count": int(improving_count),
+        "plateaued": bool(plateaued),
+        "pending_count": int(pending_count),
+        "best_epoch_estimate": best_epoch_estimate,
+        "images": images,
+    })

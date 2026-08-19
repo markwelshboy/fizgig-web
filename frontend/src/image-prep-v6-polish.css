@@ -1,0 +1,245 @@
+/* V6 Image Prep polish after real-world use. Loaded after image-prep-v6.css. */
+
+/* Keep project asset cards on the dark application palette. Several inherited/fallback
+   rules used #fff when --panel-bg was not defined, producing light cards with light text. */
+.image-prep-v6 .v6-source-card,
+.image-prep-v6 .v6-source-card .prep-image-meta,
+.image-prep-v6 .v6-working-assets,
+.image-prep-v6 .v6-working-heading,
+.image-prep-v6 .v6-working-card,
+.image-prep-v6 .v6-working-card .prep-image-meta,
+.image-prep-v6 .v6-density-control button {
+  background: #0a1422;
+  color: #eef2ff;
+}
+
+.image-prep-v6 .v6-working-assets {
+  background: #091321;
+}
+
+.image-prep-v6 .v6-source-card .prep-image-meta,
+.image-prep-v6 .v6-working-card .prep-image-meta {
+  min-height: 52px;
+  border-top: 1px solid #223148;
+}
+
+.image-prep-v6 .v6-source-card .prep-image-meta span,
+.image-prep-v6 .v6-working-card .prep-image-meta span,
+.image-prep-v6 .v6-working-heading small,
+.image-prep-v6 .v6-density-control span {
+  color: #91a3ba;
+}
+
+/* Source-selection controls for face derivatives. */
+.v6-face-source-selection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: -4px;
+}
+
+.v6-face-source-selection .micro-action {
+  padding: 5px 9px;
+  border: 1px solid #30435e;
+  border-radius: 7px;
+  background: #0b1625;
+  color: #cbd6e8;
+  font-size: 11px;
+}
+
+.v6-face-source-selection .micro-action:hover {
+  border-color: #6678ff;
+  color: #fff;
+}
+
+.v6-face-source-selection .selection-count {
+  color: #8294ad;
+  font-size: 11px;
+  margin-left: 2px;
+}
+
+/* Face proposals should keep their natural card height. Constraining a large grid by
+   max-height caused auto tracks to collapse into horizontal slivers. */
+.image-prep-v6 .v6-face-proposals {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  grid-auto-rows: max-content;
+  align-content: start;
+  max-height: 640px;
+  gap: 14px;
+  padding: 3px 8px 3px 3px;
+}
+
+.image-prep-v6 .v6-face-proposals .face-proposal-card {
+  width: 100%;
+  min-width: 0;
+  align-self: start;
+  background: #0a1422;
+  color: #eef2ff;
+}
+
+.image-prep-v6 .v6-face-proposals .face-proposal-native {
+  min-height: 240px;
+  max-height: 440px;
+  display: grid;
+  place-items: center;
+  background: #050d17;
+}
+
+.image-prep-v6 .v6-face-proposals .face-proposal-native img {
+  width: 100%;
+  height: 100%;
+  min-height: 240px;
+  object-fit: contain;
+  background: #050d17;
+}
+
+.image-prep-v6 .v6-face-proposals .prep-image-meta {
+  background: #0a1422;
+  color: #eef2ff;
+  min-height: 74px;
+}
+
+/* A single proposal should remain comfortably inspectable rather than collapsing into
+   a narrow row, while still avoiding an enormous full-workspace stretch. */
+.image-prep-v6 .v6-face-proposals > :only-child {
+  max-width: 560px;
+}
+
+/* Trainer crop presets: reserve enough width for labels such as “Half bucket”. */
+.image-prep-v6 .manual-preset-row {
+  grid-template-columns: repeat(4, minmax(145px, 1fr));
+}
+
+.image-prep-v6 .manual-preset-row label {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 10px;
+  padding: 11px 12px;
+}
+
+.image-prep-v6 .manual-preset-row label > input {
+  width: auto;
+  margin: 0;
+}
+
+.image-prep-v6 .manual-preset-row label span {
+  min-width: 0;
+}
+
+.image-prep-v6 .manual-preset-row label strong {
+  white-space: nowrap;
+}
+
+.image-prep-v6 .manual-preset-row label.low-detail-option {
+  border-color: rgba(245, 158, 11, .62);
+  background: rgba(180, 83, 9, .09);
+}
+
+.image-prep-v6 .manual-preset-row label.low-detail-option small {
+  color: #fbbf24;
+}
+
+/* Resolution/crop diagnostics. */
+.v6-card-flags {
+  position: absolute;
+  z-index: 4;
+  top: 7px;
+  right: 7px;
+  display: grid;
+  justify-items: end;
+  gap: 5px;
+  pointer-events: none;
+}
+
+.v6-crop-flag,
+.v6-quality-flag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 22px;
+  padding: 3px 6px;
+  border-radius: 7px;
+  border: 1px solid rgba(255,255,255,.35);
+  background: rgba(4, 10, 18, .82);
+  color: #eef2ff;
+  box-shadow: 0 2px 8px rgba(0,0,0,.28);
+  backdrop-filter: blur(4px);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.v6-crop-flag {
+  font-size: 12px;
+  letter-spacing: -2px;
+  padding-right: 8px;
+}
+
+.v6-quality-flag.warning {
+  border-color: rgba(245, 158, 11, .72);
+  background: rgba(120, 53, 15, .9);
+  color: #fde68a;
+  letter-spacing: .03em;
+}
+
+.image-prep-v6 .v6-source-card.low-detail,
+.image-prep-v6 .v6-working-card.low-detail,
+.image-prep-v6 .face-proposal-card.low-detail {
+  border-color: rgba(245, 158, 11, .72);
+  box-shadow: inset 0 0 0 1px rgba(245, 158, 11, .16);
+}
+
+.image-prep-v6 .status-suspect,
+.image-prep-v6 .v6-low-detail-text {
+  color: #fbbf24 !important;
+}
+
+.image-prep-v6 .manual-crop-consequence.low-detail {
+  border: 1px solid rgba(245, 158, 11, .42);
+  background: rgba(180, 83, 9, .14);
+  color: #fbbf24;
+}
+
+/* Give the per-image editor a little more breathing room when one image is being reviewed. */
+.image-prep-v6 .v6-tool-panel .position-crop-shell,
+.image-prep-v6 .trainer-manual-editor {
+  width: 100%;
+}
+
+.image-prep-v6 .v6-tool-panel .position-crop-canvas {
+  max-height: 760px;
+}
+
+/* Sidebar action buttons are buttons, not links. Reset browser button styling so hover/focus
+   looks the same as the navigation links instead of turning into opaque grey rectangles. */
+.sidebar button.nav-item {
+  appearance: none;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #c4cede;
+  text-align: left;
+}
+
+.sidebar button.nav-item:hover,
+.sidebar button.nav-item:focus-visible {
+  background: #121d2e;
+  color: #eef2ff;
+  outline: none;
+}
+
+.sidebar button.nav-item:active {
+  background: #17243a;
+}
+
+@media (max-width: 1180px) {
+  .image-prep-v6 .manual-preset-row {
+    grid-template-columns: repeat(2, minmax(160px, 1fr));
+  }
+  .image-prep-v6 .v6-face-proposals {
+    grid-template-columns: 1fr;
+  }
+}

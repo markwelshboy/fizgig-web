@@ -1,0 +1,126 @@
+/* Final Working Assets interaction polish. Loaded after the earlier V6 sheets. */
+
+/* Only show the expand affordance when the compact cover viewport is materially
+   clipping the prepared image. The TS classifier adds this class from the image's
+   natural dimensions, so it also works on disabled/read-only cards. */
+.image-prep-v6 .v6-working-image::after {
+  content: none !important;
+}
+
+.image-prep-v6 .v6-working-image.v6-preview-needs-fit::after {
+  content: "↗↙" !important;
+  position: absolute;
+  z-index: 7;
+  top: 7px;
+  right: 7px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 7px 0 5px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, .42);
+  border-radius: 7px;
+  background: rgba(4, 10, 18, .82);
+  color: #eef2ff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+  backdrop-filter: blur(4px);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  pointer-events: none;
+}
+
+.image-prep-v6 .v6-working-image:not(.v6-preview-needs-fit):hover > img {
+  object-fit: cover;
+  object-position: center;
+}
+
+.image-prep-v6 .v6-working-image.v6-preview-needs-fit:hover > img {
+  object-fit: contain;
+  object-position: center;
+  background: #050d17;
+}
+
+.image-prep-v6 .v6-working-image.v6-preview-needs-fit:hover::after {
+  border-color: rgba(167, 139, 250, .88);
+  background: rgba(76, 29, 149, .88);
+  color: #fff;
+}
+
+/* The explicit composition-crop diagnostic stays in the DOM for data/state, but
+   the visible ↗↙ glyph now means only "this thumbnail is clipped; hover to fit". */
+.image-prep-v6 .v6-working-image .v6-crop-flag {
+  display: none !important;
+}
+
+/* Global Preparation intentionally locks selection. Do not dim the image just
+   because the card button is disabled: judging the live tonal preview is the point.
+   Dim only the read-only tick so its locked state is obvious. */
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:first-child.selected) .v6-working-card:disabled:not(.unavailable) {
+  opacity: 1 !important;
+  filter: none !important;
+}
+
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:first-child.selected) .v6-working-card:disabled:not(.unavailable) .v6-tool-check {
+  opacity: .42;
+  filter: saturate(.45);
+}
+
+/* Face Derivatives: Working Assets is the selection surface. Keep the React-owned
+   source controls in place but visually hide them; the small TS affordance module
+   mirrors them beneath the Working Assets mode label so selection lives where the
+   user is actually clicking. */
+.image-prep-v6 .v6-processing-layout:has(.v6-tool-tabs button:nth-child(2).selected) .v6-face-source-selection {
+  display: none !important;
+}
+
+.image-prep-v6 .v6-working-selection-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.image-prep-v6 .v6-working-selection-actions .micro-action {
+  padding: 4px 8px;
+  border: 1px solid #30435e;
+  border-radius: 7px;
+  background: #0b1625;
+  color: #cbd6e8;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.image-prep-v6 .v6-working-selection-actions .micro-action:hover:not(:disabled) {
+  border-color: #6678ff;
+  color: #fff;
+}
+
+.image-prep-v6 .v6-working-selection-actions .micro-action:disabled {
+  opacity: .42;
+}
+
+.image-prep-v6 .v6-working-selection-actions .selection-count {
+  color: #8294ad;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+/* When a global draft exists, downstream tools intentionally use the last saved
+   prepared-image state. The TS guard toggles this class without inserting nodes
+   into React's DOM tree. */
+.image-prep-v6.v6-global-draft-dirty .v6-tool-panel::before {
+  content: "Unsaved Global Preparation changes are not applied here. This tool is using the last saved prepared-image state; save Global Preparation to update downstream tools.";
+  display: block;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(245, 158, 11, .48);
+  border-radius: 8px;
+  background: rgba(180, 83, 9, .12);
+  color: #fbbf24;
+  font-size: 11px;
+  line-height: 1.35;
+}

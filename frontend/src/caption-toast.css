@@ -1,0 +1,25 @@
+/* Captioning uses the same non-disruptive notification placement as Image Prep. */
+.caption-unit-copy > .notice.success,
+.caption-unit-copy > .notice.error {
+  position: fixed;
+  right: 28px;
+  bottom: 28px;
+  z-index: 1000;
+  width: auto;
+  max-width: 440px;
+  margin: 0;
+  padding: 13px 16px;
+  border-radius: 11px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, .4);
+  animation: prep-toast-in .18s ease-out;
+}
+
+@media (max-width: 640px) {
+  .caption-unit-copy > .notice.success,
+  .caption-unit-copy > .notice.error {
+    left: 16px;
+    right: 16px;
+    bottom: 16px;
+    max-width: none;
+  }
+}

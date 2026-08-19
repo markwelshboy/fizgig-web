@@ -1,0 +1,218 @@
+/* Start-page create/import composition. */
+.project-entry-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+.create-project-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.project-create-heading p,
+.import-project-panel p,
+.project-create-subpanel p {
+  margin-top: 0;
+  margin-bottom: 0;
+}
+.project-create-subpanel {
+  border: 1px solid #26364f;
+  border-radius: 12px;
+  padding: 16px;
+  background: #0b1626;
+  min-width: 0;
+}
+.project-create-subpanel .card-title {
+  margin-bottom: 6px;
+}
+.project-create-actions {
+  margin-top: auto;
+}
+.import-project-panel {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+}
+.project-import-button {
+  justify-self: start;
+}
+.project-name-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.project-name-row input[readonly] {
+  color: #d9e2f0;
+  background: #0c1726;
+}
+.project-name-edit-pill {
+  border: 1px solid #7047c6;
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: rgba(112, 71, 198, .14);
+  color: #c4a7ff;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.project-name-edit-pill:hover {
+  border-color: #8b5cf6;
+  background: rgba(124, 58, 237, .24);
+}
+.project-create-subpanel textarea {
+  min-height: 76px;
+}
+
+/* Start-page source controls: keep the path and archive action together, with load beneath. */
+.source-path-block {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px 10px;
+  align-items: end;
+}
+.source-path-block > .source-directory-label {
+  grid-column: 1 / -1;
+  color: inherit;
+  font-size: 12px;
+}
+.source-path-block > input:not(.visually-hidden-file) {
+  grid-column: 1;
+  min-width: 0;
+}
+.source-path-block > .source-upload-button {
+  grid-column: 2;
+  white-space: nowrap;
+}
+.source-path-block > .source-load-button {
+  grid-column: 1;
+  justify-self: start;
+}
+.visually-hidden-file {
+  display: none !important;
+}
+.archive-download-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.archive-download-link:hover {
+  border-color: #516b91;
+  background: #16243a;
+}
+
+/* Source selection can determine whether a square cover thumbnail genuinely
+   hides image area from the image's intrinsic dimensions. Keep this helper in
+   the same bottom-right helper position used by Image Prep cards. */
+.source-selection-image::after {
+  display: none !important;
+}
+.source-selection-image.can-expand::after {
+  content: "↗↙";
+  position: absolute;
+  left: auto;
+  right: 7px;
+  bottom: 7px;
+  z-index: 4;
+  display: grid !important;
+  place-items: center;
+  min-width: 26px;
+  height: 20px;
+  padding: 0 5px;
+  border: 1px solid rgba(190, 154, 255, .75);
+  border-radius: 7px;
+  background: rgba(76, 29, 149, .88);
+  color: #efe6ff;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .28);
+  opacity: .8;
+  pointer-events: none;
+}
+.source-selection-card:hover .source-selection-image.can-expand::after {
+  opacity: 1;
+}
+
+/* Project Source is one conceptual three-column table even though React uses
+   separate ledgers for source identity, accounting, and technical details.
+   Force one set of tracks so all three column starts are identical. */
+.project-source-panel {
+  --project-ledger-label: 200px;
+  --project-ledger-value: minmax(260px, 36%);
+}
+.project-source-panel .project-source-ledger,
+.project-source-panel .source-accounting-ledger,
+.project-source-panel .project-technical-ledger {
+  grid-template-columns: var(--project-ledger-label) var(--project-ledger-value) minmax(0, 1fr) !important;
+  column-gap: 22px;
+}
+
+/* Plumbing identifiers remain available for provenance/debugging without
+   competing with the user-facing project summary. */
+.project-technical-details {
+  margin-top: 2px;
+  border-top: 1px solid #24354d;
+  padding-top: 8px;
+}
+.project-technical-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #8194ad;
+  font-size: 11px;
+  user-select: none;
+}
+.project-technical-details summary:hover {
+  color: #c7d3e8;
+}
+.project-technical-ledger {
+  margin-top: 6px;
+}
+.project-technical-ledger span,
+.project-technical-ledger strong,
+.project-technical-ledger small {
+  padding-top: 7px;
+  padding-bottom: 7px;
+}
+
+@media (max-width: 980px) {
+  .project-entry-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .source-path-block {
+    grid-template-columns: 1fr;
+  }
+  .source-path-block > .source-directory-label,
+  .source-path-block > input:not(.visually-hidden-file),
+  .source-path-block > .source-upload-button,
+  .source-path-block > .source-load-button {
+    grid-column: 1;
+  }
+  .source-path-block > .source-upload-button,
+  .source-path-block > .source-load-button {
+    justify-self: stretch;
+  }
+
+  .project-source-panel .project-source-ledger,
+  .project-source-panel .source-accounting-ledger,
+  .project-source-panel .project-technical-ledger {
+    grid-template-columns: 1fr !important;
+  }
+
+  .project-name-row {
+    grid-template-columns: 1fr;
+  }
+  .project-name-edit-pill {
+    justify-self: start;
+  }
+}
