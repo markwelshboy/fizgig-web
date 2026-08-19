@@ -149,6 +149,9 @@ def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
     decisions = _read_jsonl(decisions_path, 5000)
     events = _read_jsonl(events_path, 5000)
     current_problem_state = _read_json(problem_path)
+    dataset_snapshot = _read_json(run_dir / "dataset_snapshot.json")
+    run_policy = _read_json(run_dir / "run_policy.json")
+    caption_updates_applied = _read_json(run_dir / "loss_log" / "caption_updates_applied.json")
 
     # The browser wants stable asset trajectories, not a giant undifferentiated JSONL.
     trajectories: dict[str, list[dict[str, Any]]] = {}
@@ -169,6 +172,9 @@ def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
             "problem_images": problem_path.is_file(),
             "events": events_path.is_file(),
             "console": console_path.is_file(),
+            "dataset_snapshot": dataset_snapshot is not None,
+            "run_policy": run_policy is not None,
+            "caption_updates_applied": caption_updates_applied is not None,
         },
         "metrics": metrics,
         "trajectories": trajectories,
@@ -177,5 +183,8 @@ def snapshot(project_id: str, run_id: str) -> dict[str, Any]:
         "events": events,
         "assets": _asset_metadata(project_id, run, run_dir),
         "samples": _sample_metadata(project_id, run_id, run_dir),
+        "dataset_snapshot": dataset_snapshot,
+        "run_policy": run_policy,
+        "caption_updates_applied": caption_updates_applied,
         "console_tail": _console_tail(console_path),
     }
