@@ -34,6 +34,7 @@ import "./caption-sampling-polish.css";
 import "./training-harness.css";
 import "./training-telemetry.css";
 import "./training-run-review.css";
+import "./run-comparison.css";
 import "./preferences.css";
 import "./tabler-icon-tuneups.css";
 import "./project-transfer.css";
