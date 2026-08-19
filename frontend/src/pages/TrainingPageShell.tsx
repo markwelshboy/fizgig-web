@@ -124,23 +124,26 @@ type RunHistoryProps = {
   openingRunId: string | null;
   actionSelection: Set<string>;
   deleting: boolean;
+  cloningRunId: string | null;
   stoppingRunId: string | null;
   onReview: (runId: string) => void;
   onToggle: (runId: string, checked: boolean) => void;
+  onClone: () => void;
   onCompare: () => void;
   onDelete: () => void;
   onStop: (runId: string) => void;
 };
 
-function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleting, stoppingRunId, onReview, onToggle, onCompare, onDelete, onStop }: RunHistoryProps) {
+function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleting, cloningRunId, stoppingRunId, onReview, onToggle, onClone, onCompare, onDelete, onStop }: RunHistoryProps) {
   const selectedCount = actionSelection.size;
   return <section className="panel stack training-run-browser-panel">
     <div className="training-section-heading training-run-browser-heading">
-      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Select exactly two completed/stopped runs to compare them on shared axes.</p></div>
+      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Select one run to clone its starting configuration, or exactly two completed/stopped runs to compare them on shared axes.</p></div>
       <div className="training-run-browser-header-actions">
         {selectedCount > 0 && <div className="training-run-selection-actions">
+          {selectedCount === 1 && <button type="button" className="secondary" disabled={Boolean(cloningRunId)} onClick={onClone} title="Load this run's starting configuration into the editable next-run controls. Telemetry, samples, checkpoints and history are not copied.">{cloningRunId ? "Loading…" : "Clone Config"}</button>}
           {selectedCount === 2 && <button type="button" className="secondary" onClick={onCompare}>Compare</button>}
-          <button type="button" className="danger" disabled={deleting} onClick={onDelete}>{deleting ? "Deleting…" : `Delete ${selectedCount}`}</button>
+          <button type="button" className="danger" disabled={deleting || Boolean(cloningRunId)} onClick={onDelete}>{deleting ? "Deleting…" : `Delete ${selectedCount}`}</button>
         </div>}
         <span className="training-samples-count">{runs.length} run{runs.length === 1 ? "" : "s"}</span>
       </div>
@@ -153,14 +156,14 @@ function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleti
         const stopping = stoppingRunId === item.id || item.status === "stopping";
         const checked = actionSelection.has(item.id);
         return <div className={`training-run-browser-row ${viewing ? "selected" : ""} ${checked ? "action-selected" : ""}`} key={item.id}>
-          <button type="button" className="training-run-browser-review" onClick={() => onReview(item.id)} disabled={opening}>
+          <button type="button" className="training-run-browser-review" onClick={() => onReview(item.id)} disabled={opening || Boolean(cloningRunId)}>
             <span className="training-run-browser-identity"><strong>{item.id}</strong><span>{item.name}</span><small>Dataset {item.dataset_revision}</small></span>
             <span className="training-run-browser-status"><span>{item.status}</span><small>{modelLabel(item.model_family)}</small><b>{opening ? "Opening…" : viewing ? "Viewing" : "Review"}</b></span>
           </button>
           <div className="training-run-browser-row-actions">
             {active && <button type="button" className="training-run-stop" disabled={stopping} onClick={() => onStop(item.id)}>{stopping ? "Stopping…" : "Stop"}</button>}
-            <label className={`training-run-select ${active ? "disabled" : ""}`} title={active ? "Stop this run before selecting it for comparison/deletion." : "Select run"}>
-              <input type="checkbox" checked={checked} disabled={active || deleting} onChange={(event) => onToggle(item.id, event.target.checked)} />
+            <label className={`training-run-select ${active ? "disabled" : ""}`} title={active ? "Stop this run before selecting it for cloning/comparison/deletion." : "Select run"}>
+              <input type="checkbox" checked={checked} disabled={active || deleting || Boolean(cloningRunId)} onChange={(event) => onToggle(item.id, event.target.checked)} />
               <span className="sr-only">Select {item.id}</span>
             </label>
           </div>
@@ -176,6 +179,7 @@ export function TrainingPageShell() {
   const [historyError, setHistoryError] = useState("");
   const [actionSelection, setActionSelection] = useState<Set<string>>(new Set());
   const [comparisonIds, setComparisonIds] = useState<[string, string] | null>(null);
+  const [cloningRunId, setCloningRunId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
 
@@ -221,6 +225,30 @@ export function TrainingPageShell() {
       if (checked) next.add(runId); else next.delete(runId);
       return next;
     });
+  }
+
+  async function cloneSelectedRunConfig() {
+    if (!project || actionSelection.size !== 1) return;
+    const sourceRunId = [...actionSelection][0];
+    setCloningRunId(sourceRunId);
+    setHistoryError("");
+    try {
+      // TrainingPage already treats a loaded immutable run as the editable template for the
+      // next Prepare action. Loading it here therefore copies only its starting configuration
+      // into the controls; Prepare creates a fresh run snapshot and none of the source run's
+      // telemetry, samples, checkpoints, console history or artifacts are copied forward.
+      const sourceRun = await getRun(project.id, sourceRunId);
+      setRun(sourceRun);
+      setComparisonIds(null);
+      setActionSelection(new Set());
+      window.setTimeout(() => {
+        document.querySelector(".training-config-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 0);
+    } catch (exc) {
+      setHistoryError(exc instanceof Error ? exc.message : String(exc));
+    } finally {
+      setCloningRunId(null);
+    }
   }
 
   function compareSelectedRuns() {
@@ -290,9 +318,11 @@ export function TrainingPageShell() {
       openingRunId={openingRunId}
       actionSelection={actionSelection}
       deleting={deleting}
+      cloningRunId={cloningRunId}
       stoppingRunId={stoppingRunId}
       onReview={(runId) => void reviewRun(runId)}
       onToggle={toggleRun}
+      onClone={() => void cloneSelectedRunConfig()}
       onCompare={compareSelectedRuns}
       onDelete={() => void deleteSelectedRuns()}
       onStop={(runId) => void stopRun(runId)}
