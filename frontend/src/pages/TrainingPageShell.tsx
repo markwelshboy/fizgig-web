@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { deleteRun, getProject, getRun, getRunTelemetry, stopTraining, type ProjectRunSummary, type TrainingSample } from "../api";
+import { RunComparisonPanel } from "../components/RunComparisonPanel";
 import { useSession } from "../session";
 import { TrainingPage } from "./TrainingPage";
 
@@ -126,18 +127,19 @@ type RunHistoryProps = {
   stoppingRunId: string | null;
   onReview: (runId: string) => void;
   onToggle: (runId: string, checked: boolean) => void;
+  onCompare: () => void;
   onDelete: () => void;
   onStop: (runId: string) => void;
 };
 
-function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleting, stoppingRunId, onReview, onToggle, onDelete, onStop }: RunHistoryProps) {
+function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleting, stoppingRunId, onReview, onToggle, onCompare, onDelete, onStop }: RunHistoryProps) {
   const selectedCount = actionSelection.size;
   return <section className="panel stack training-run-browser-panel">
     <div className="training-section-heading training-run-browser-heading">
-      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Select completed/stopped runs for purge or future comparison.</p></div>
+      <div><p className="eyebrow">Project history</p><div className="card-title">Training Runs</div><p className="muted">Open any preserved run to review its immutable snapshot, telemetry, console output and generated samples. Select exactly two completed/stopped runs to compare them on shared axes.</p></div>
       <div className="training-run-browser-header-actions">
         {selectedCount > 0 && <div className="training-run-selection-actions">
-          {selectedCount === 2 && <button type="button" className="secondary" disabled title="Run comparison plumbing is the next step.">Compare</button>}
+          {selectedCount === 2 && <button type="button" className="secondary" onClick={onCompare}>Compare</button>}
           <button type="button" className="danger" disabled={deleting} onClick={onDelete}>{deleting ? "Deleting…" : `Delete ${selectedCount}`}</button>
         </div>}
         <span className="training-samples-count">{runs.length} run{runs.length === 1 ? "" : "s"}</span>
@@ -157,7 +159,7 @@ function RunHistory({ runs, selectedRunId, openingRunId, actionSelection, deleti
           </button>
           <div className="training-run-browser-row-actions">
             {active && <button type="button" className="training-run-stop" disabled={stopping} onClick={() => onStop(item.id)}>{stopping ? "Stopping…" : "Stop"}</button>}
-            <label className={`training-run-select ${active ? "disabled" : ""}`} title={active ? "Stop this run before selecting it for deletion." : "Select run"}>
+            <label className={`training-run-select ${active ? "disabled" : ""}`} title={active ? "Stop this run before selecting it for comparison/deletion." : "Select run"}>
               <input type="checkbox" checked={checked} disabled={active || deleting} onChange={(event) => onToggle(item.id, event.target.checked)} />
               <span className="sr-only">Select {item.id}</span>
             </label>
@@ -173,6 +175,7 @@ export function TrainingPageShell() {
   const [openingRunId, setOpeningRunId] = useState<string | null>(null);
   const [historyError, setHistoryError] = useState("");
   const [actionSelection, setActionSelection] = useState<Set<string>>(new Set());
+  const [comparisonIds, setComparisonIds] = useState<[string, string] | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [stoppingRunId, setStoppingRunId] = useState<string | null>(null);
 
@@ -192,6 +195,7 @@ export function TrainingPageShell() {
   useEffect(() => {
     const available = new Set(visibleRuns.map((item) => item.id));
     setActionSelection((current) => new Set([...current].filter((id) => available.has(id))));
+    setComparisonIds((current) => current && current.every((id) => available.has(id)) ? current : null);
   }, [visibleRuns]);
 
   async function reviewRun(runId: string) {
@@ -217,6 +221,16 @@ export function TrainingPageShell() {
       if (checked) next.add(runId); else next.delete(runId);
       return next;
     });
+  }
+
+  function compareSelectedRuns() {
+    if (actionSelection.size !== 2) return;
+    const ids = [...actionSelection] as [string, string];
+    const ordered = [...ids].sort((left, right) => left.localeCompare(right, undefined, { numeric: true })) as [string, string];
+    setComparisonIds(ordered);
+    window.setTimeout(() => {
+      document.querySelector(".run-comparison-panel")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
   }
 
   async function stopRun(runId: string) {
@@ -250,6 +264,7 @@ export function TrainingPageShell() {
       const refreshed = await getProject(project.id);
       setProject(refreshed);
       setActionSelection(new Set());
+      if (comparisonIds?.some((id) => ids.includes(id))) setComparisonIds(null);
       if (run && ids.includes(run.id)) {
         if (refreshed.current_run) {
           try { setRun(await getRun(project.id, refreshed.current_run)); }
@@ -266,6 +281,7 @@ export function TrainingPageShell() {
 
   return <div className="stack training-page-shell">
     <TrainingPage />
+    {comparisonIds && project && <RunComparisonPanel projectId={project.id} runIds={comparisonIds} onClose={() => setComparisonIds(null)} />}
     {run && project && <RunSampleGallery projectId={project.id} runId={run.id} runStatus={run.status} />}
     {historyError && <div className="training-error" role="alert">{historyError}</div>}
     {project && visibleRuns.length > 0 && <RunHistory
@@ -277,6 +293,7 @@ export function TrainingPageShell() {
       stoppingRunId={stoppingRunId}
       onReview={(runId) => void reviewRun(runId)}
       onToggle={toggleRun}
+      onCompare={compareSelectedRuns}
       onDelete={() => void deleteSelectedRuns()}
       onStop={(runId) => void stopRun(runId)}
     />}
