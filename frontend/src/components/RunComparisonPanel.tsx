@@ -91,11 +91,12 @@ function runMode(run: RunInfo) {
 function prettyMode(value: string) {
   if (value === "loss_watch_intervention") return "Loss-watch intervention";
   if (value === "observation_only") return "Observation only";
-  return value.replaceAll("_", " ");
+  return value.split("_").join(" ");
 }
 
 function modelSignature(run: RunInfo) {
-  const assets = Array.isArray(record(run.model_manifest).assets) ? record(run.model_manifest).assets as Array<Record<string, unknown>> : [];
+  const manifest = record(run.model_manifest);
+  const assets = Array.isArray(manifest.assets) ? manifest.assets as Array<Record<string, unknown>> : [];
   return assets
     .filter((asset) => asset.core !== false)
     .map((asset) => `${String(asset.key || asset.filename || "asset")}:${String(asset.sha256 || "")}`)
